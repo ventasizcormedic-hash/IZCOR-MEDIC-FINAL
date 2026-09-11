@@ -1,0 +1,85 @@
+[
+  {
+    "brand": "Mindray",
+    "name": "BeneVision N22/N19 Patient Monitor",
+    "model": "BeneVision N22",
+    "category": "Monitoreo de pacientes",
+    "subcategory": "Monitores de cuidados críticos",
+    "description": "El BeneVision N22 es un monitor de pacientes de alta agudeza diseñado específicamente para entornos de cuidados críticos como salas de emergencia, unidades de cuidados intensivos (UCI) y quirófanos. Proporciona una solución modular y configurable que permite a los profesionales de la salud acceder a un conjunto completo de mediciones multiparamétricas avanzadas. Aborda la necesidad de visualización clara de datos complejos mediante pantallas táctiles grandes con rotación inteligente (vertical u horizontal). Integra Aplicaciones de Asistencia Clínica (CAAs) como SepsisSight™ y HemoSight™ para respaldar la toma de decisiones clínicas críticas. Está destinado a profesionales médicos en entornos hospitalarios de alta exigencia.",
+    "features": [
+      "Pantalla táctil de 22 pulgadas",
+      "Rotación de pantalla inteligente (vertical y horizontal)",
+      "Interfaz de usuario intuitiva estilo smartphone",
+      "Módulos compatibles para ECG, SpO2, PNI, respiración y temperatura",
+      "Aplicaciones de Asistencia Clínica (CAAs) integradas"
+    ],
+    "application": [
+      "Cuidados intensivos (UCI)",
+      "Salas de emergencia",
+      "Quirófanos",
+      "Monitorización hemodinámica",
+      "Monitorización de sepsis"
+    ],
+    "presentation": "Sistema completo modular con monitor y accesorios",
+    "imageUrl": null,
+    "datasheetUrl": null,
+    "sourceUrl": "https://www.mindray.com/na/products/patient-monitoring/benevision-n22-n19",
+    "sourceDate": "2026-09-08",
+    "verificationStatus": "DRAFT"
+  },
+  {
+    "brand": "Mindray",
+    "name": "Resona 7 Ultrasound System",
+    "model": "Resona 7",
+    "category": "Ultrasonido",
+    "subcategory": "Imágenes generales",
+    "description": "El sistema de ultrasonido Resona 7 es una plataforma de diagnóstico por imagen premium que ofrece herramientas clínicas avanzadas para imágenes generales y salud de la mujer. Utiliza tecnologías innovadoras de procesamiento de imágenes para proporcionar resolución y penetración excepcionales, abordando problemas clínicos de diagnóstico complejo en pacientes difíciles. Su diseño ergonómico y flujo de trabajo optimizado están pensados para radiólogos y especialistas que requieren alta precisión diagnóstica en hospitales y clínicas especializadas.",
+    "features": [
+      "Plataforma de procesamiento de datos por zonas (ZST+)",
+      "Herramientas avanzadas de elastografía",
+      "Imágenes de contraste",
+      "Herramientas de análisis 3D/4D",
+      "Panel de control ergonómico ajustable"
+    ],
+    "application": [
+      "Imágenes generales",
+      "Radiología",
+      "Salud de la mujer",
+      "Obstetricia y Ginecología",
+      "Diagnóstico vascular"
+    ],
+    "presentation": "Equipo de consola con transductores",
+    "imageUrl": null,
+    "datasheetUrl": null,
+    "sourceUrl": "https://www.mindray.com/na/products/ultrasound/general-imaging/resona-7",
+    "sourceDate": "2026-09-08",
+    "verificationStatus": "DRAFT"
+  },
+  {
+    "brand": "Nipro",
+    "name": "Surdial 55Plus Hemodialysis System",
+    "model": "Surdial 55Plus",
+    "category": "Hemodiálisis",
+    "subcategory": "Máquinas de hemodiálisis",
+    "description": "El Surdial 55Plus es un sistema avanzado de hemodiálisis diseñado para proporcionar tratamientos de diálisis seguros y eficientes a pacientes con insuficiencia renal. El equipo está enfocado en la facilidad de uso y la seguridad del paciente, integrando sistemas de monitoreo precisos para el control del flujo, la presión y la temperatura del dializado. Su interfaz permite al personal de enfermería nefrológica configurar y supervisar el tratamiento con facilidad, optimizando el flujo de trabajo en clínicas de diálisis de alto volumen.",
+    "features": [
+      "Monitoreo de presión venosa y arterial",
+      "Control preciso de ultrafiltración",
+      "Interfaz de usuario simplificada",
+      "Sistemas de alarma de seguridad integrados",
+      "Diseño compacto para optimizar espacio clínico"
+    ],
+    "application": [
+      "Hemodiálisis crónica",
+      "Tratamiento de insuficiencia renal",
+      "Centros de diálisis ambulatorios",
+      "Departamentos de nefrología hospitalarios"
+    ],
+    "presentation": "Sistema de consola individual",
+    "imageUrl": null,
+    "datasheetUrl": null,
+    "sourceUrl": "https://www.nipro-group.com/en/our-offer/products-services",
+    "sourceDate": "2026-09-08",
+    "verificationStatus": "DRAFT"
+  }
+]

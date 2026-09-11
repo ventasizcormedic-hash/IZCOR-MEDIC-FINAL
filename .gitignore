@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Build output
+build/
+dist/
+coverage/
+test-results/
+playwright-report/
+
+# Local runtime data
+.data/
+*.sqlite*
+public/uploads/*
+!public/uploads/.gitkeep
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Logs and system files
+*.log
+.DS_Store
+Thumbs.db
+
+# Generated / misc
+poppler*
+Nueva carpeta/

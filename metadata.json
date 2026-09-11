@@ -1,0 +1,6 @@
+{
+  "name": "IZCOR - Soluciones Médicas",
+  "description": "IZCOR — Plataforma corporativa con catálogo multimarca y motor autónomo de sincronización, validación y publicación continua de equipamiento e insumos médicos.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
