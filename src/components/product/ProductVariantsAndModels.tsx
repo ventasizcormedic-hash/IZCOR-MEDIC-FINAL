@@ -59,7 +59,7 @@ export const ProductVariantsAndModels: React.FC<ProductVariantsAndModelsProps> =
         {siblingModels.map((item) => (
           <Link
             key={item.id}
-            to={`/productos/${item.slug}`}
+            to={`/producto/${item.slug}`}
             className="p-4 rounded-xl border border-slate-200 bg-white hover:border-brand-navy hover:shadow-sm transition-all group flex flex-col justify-between"
           >
             <div>

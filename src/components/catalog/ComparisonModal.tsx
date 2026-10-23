@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useRef } from 'react';
+import { useModalBehavior } from '../../hooks/useModalBehavior';
 import { Link } from 'react-router-dom';
 import { X, ShieldCheck, FileText, ArrowRight, Activity, Trash2, CheckCircle2 } from 'lucide-react';
 import { ComparisonProduct } from './types';
@@ -18,6 +19,9 @@ export function ComparisonModal({
   onRemoveProduct,
   onClearAll,
 }: ComparisonModalProps) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  useModalBehavior(isOpen, onClose, contentRef);
+
   if (!isOpen) return null;
 
   return (
@@ -26,8 +30,9 @@ export function ComparisonModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="comparison-title"
+      onClick={onClose}
     >
-      <div className="bg-white rounded-2xl max-w-6xl w-full max-h-[90vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+      <div ref={contentRef} onClick={(e) => e.stopPropagation()} className="bg-white rounded-2xl max-w-6xl w-full max-h-[90vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         
         {/* Header */}
         <div className="p-5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
@@ -240,7 +245,7 @@ export function ComparisonModal({
                           Cotizar
                         </Link>
                         <Link
-                          to={`/productos/${p.slug}`}
+                          to={`/producto/${p.slug}`}
                           className="w-full inline-flex items-center justify-center gap-1 h-8 px-3 rounded-xl text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 hover:text-brand-navy active:scale-[0.98] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
                         >
                           <span>Ver ficha</span>

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 
 export interface QuoteTrayItem {
   id: number;
@@ -50,6 +50,11 @@ export function QuoteProvider({ children }: { children: ReactNode }) {
 
   const [isTrayOpen, setIsTrayOpen] = useState(false);
   const [justAddedId, setJustAddedId] = useState<number | null>(null);
+  const justAddedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (justAddedTimer.current) clearTimeout(justAddedTimer.current);
+  }, []);
 
   useEffect(() => {
     try {
@@ -71,7 +76,8 @@ export function QuoteProvider({ children }: { children: ReactNode }) {
     categoryName?: string | null;
   }) => {
     setJustAddedId(product.id);
-    setTimeout(() => setJustAddedId(null), 2000);
+    if (justAddedTimer.current) clearTimeout(justAddedTimer.current);
+    justAddedTimer.current = setTimeout(() => setJustAddedId(null), 2000);
 
     setItems((prev) => {
       const existing = prev.find((item) => item.id === product.id);

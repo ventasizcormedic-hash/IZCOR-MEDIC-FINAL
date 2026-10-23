@@ -5,6 +5,7 @@ import {
   ExternalLink, AlertCircle, Loader2, Globe 
 } from 'lucide-react';
 import { ProductCard } from '../components/ProductCard';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { SeoHead } from '../components/seo/SeoHead';
 
 export function BrandDetail() {
@@ -14,11 +15,13 @@ export function BrandDetail() {
   const [searchTerm, setSearchTerm] = useState('');
   const [page, setPage] = useState(1);
   const limit = 24;
+  const debouncedSearch = useDebouncedValue(searchTerm, 300);
 
   useEffect(() => {
     if (!idOrSlug) return;
+    const controller = new AbortController();
     setLoading(true);
-    fetch(`/api/brands/${encodeURIComponent(idOrSlug)}?page=${page}&limit=${limit}&search=${encodeURIComponent(searchTerm)}`)
+    fetch(`/api/brands/${encodeURIComponent(idOrSlug)}?page=${page}&limit=${limit}&search=${encodeURIComponent(debouncedSearch)}`, { signal: controller.signal })
       .then(res => {
         if (!res.ok) throw new Error('Brand not found');
         return res.json();
@@ -28,12 +31,16 @@ export function BrandDetail() {
         setLoading(false);
       })
       .catch(err => {
+        if (err.name === 'AbortError') return;
         console.error(err);
+        setData(null);
         setLoading(false);
       });
-  }, [idOrSlug, page, searchTerm]);
+    return () => controller.abort();
+  }, [idOrSlug, page, debouncedSearch]);
 
-  if (loading) {
+  // Full-page spinner only on first load; later searches/pages keep the input mounted.
+  if (loading && !data) {
     return (
       <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center">
         <div className="text-center">
@@ -70,7 +77,7 @@ export function BrandDetail() {
         title={`${brand.name} | Equipos Médicos en Perú | IZCOR MEDIC`}
         description={brand.description ? brand.description.substring(0, 150) + "..." : `Equipamiento médico y productos de la marca ${brand.name}. Encuentra especificaciones y solicita una cotización en Izcor Medic.`}
         canonicalUrl={`/marcas/${brand.slug || encodeURIComponent(brand.name)}`}
-        noindex={page > 1 || Boolean(searchTerm)}
+        noindex={page > 1 || Boolean(debouncedSearch)}
         schemaObj={{
           "@context": "https://schema.org/",
           "@type": "Brand",
@@ -165,7 +172,11 @@ export function BrandDetail() {
               <input
                 type="text"
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setPage(1);
+                }}
+                aria-label="Filtrar productos"
                 placeholder="Filtrar productos de esta marca..."
                 className="w-full px-4 py-2 rounded-xl border border-slate-200 text-xs focus:outline-none focus:border-brand-cyan bg-white"
               />
@@ -178,7 +189,7 @@ export function BrandDetail() {
               <p className="text-sm font-bold text-[#2C3E50]">No se encontraron productos para esta marca</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div aria-busy={loading} className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 transition-opacity ${loading ? 'opacity-50' : ''}`}>
               {productList.map((prod: any) => (
                 <ProductCard key={prod.id} {...prod} />
               ))}
@@ -189,7 +200,8 @@ export function BrandDetail() {
           {totalPages > 1 && (
             <div className="flex items-center justify-center gap-2 pt-4">
               <button
-                onClick={() => setPage(p => Math.max(1, p - 1))}
+                type="button"
+                onClick={() => { setPage(p => Math.max(1, p - 1)); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
                 disabled={page === 1}
                 className="px-4 py-2 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-700 disabled:opacity-40"
               >
@@ -199,7 +211,8 @@ export function BrandDetail() {
                 Página {page} de {totalPages}
               </span>
               <button
-                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                type="button"
+                onClick={() => { setPage(p => Math.min(totalPages, p + 1)); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
                 disabled={page === totalPages}
                 className="px-4 py-2 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-700 disabled:opacity-40"
               >

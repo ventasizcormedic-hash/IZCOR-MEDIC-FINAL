@@ -63,7 +63,7 @@ export const ProductBreadcrumb: React.FC<ProductBreadcrumbProps> = ({
           <>
             <ChevronRight className="w-3.5 h-3.5 text-slate-300 flex-shrink-0" />
             <Link
-              to={subcategorySlug ? `/categorias/${subcategorySlug}` : `/productos?category=${encodeURIComponent(categoryName || '')}&subcat=${encodeURIComponent(subcategorySlug || subcategoryName)}`}
+              to={subcategorySlug ? `/categorias/${subcategorySlug}` : `/productos?category=${encodeURIComponent(categoryName || '')}&subcategory=${encodeURIComponent(subcategorySlug || subcategoryName)}`}
               className="hover:text-brand-navy transition-colors text-slate-600 max-w-[160px] sm:max-w-none truncate"
             >
               {subcategoryName}
@@ -82,7 +82,7 @@ export const ProductBreadcrumb: React.FC<ProductBreadcrumbProps> = ({
         <div className="flex items-center gap-2 self-end sm:self-auto text-xs font-medium text-slate-600">
           {prevProduct ? (
             <Link
-              to={`/productos/${prevProduct.slug}`}
+              to={`/producto/${prevProduct.slug}`}
               className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 hover:text-brand-navy transition-colors shadow-2xs"
               title={`Anterior: ${prevProduct.name}`}
             >
@@ -99,7 +99,7 @@ export const ProductBreadcrumb: React.FC<ProductBreadcrumbProps> = ({
 
           {nextProduct ? (
             <Link
-              to={`/productos/${nextProduct.slug}`}
+              to={`/producto/${nextProduct.slug}`}
               className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 hover:text-brand-navy transition-colors shadow-2xs"
               title={`Siguiente: ${nextProduct.name}`}
             >

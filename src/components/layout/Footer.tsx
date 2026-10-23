@@ -91,6 +91,16 @@ export function Footer() {
                 </Link>
               </li>
               <li>
+                <Link to="/marcas" className="text-slate-300 hover:text-white transition-colors focus-visible:outline-none focus-visible:text-cyan-300">
+                  Marcas
+                </Link>
+              </li>
+              <li>
+                <Link to="/fabricantes" className="text-slate-300 hover:text-white transition-colors focus-visible:outline-none focus-visible:text-cyan-300">
+                  Fabricantes
+                </Link>
+              </li>
+              <li>
                 <Link to="/nosotros" className="text-slate-300 hover:text-white transition-colors focus-visible:outline-none focus-visible:text-cyan-300">
                   Nosotros
                 </Link>

@@ -1,6 +1,7 @@
 import { useState, useRef, DragEvent, ChangeEvent, FormEvent } from 'react';
 import { CloudUpload, FileText, CheckCircle, AlertCircle, X, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { SeoHead } from '../components/seo/SeoHead';
 
 interface FormData {
   name: string;
@@ -32,7 +33,6 @@ export function Tdr() {
   // File Upload State
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [tdrId, setTdrId] = useState<string | null>(null);
@@ -45,7 +45,7 @@ export function Tdr() {
     if (!formData.institution.trim()) newErrors.institution = 'La entidad es obligatoria';
     if (!formData.email.trim() || !/^\S+@\S+\.\S+$/.test(formData.email)) newErrors.email = 'Correo institucional inválido';
     if (!formData.phone.trim()) newErrors.phone = 'El teléfono es obligatorio';
-    if (!file && !isUploading) newErrors.file = 'Debe adjuntar el archivo TDR';
+    if (!file) newErrors.file = 'Debe adjuntar el archivo TDR';
     
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -87,17 +87,6 @@ export function Tdr() {
 
     setFile(selectedFile);
     setErrors(prev => ({ ...prev, file: undefined }));
-    // Show local progress animation for UX feedback (does not slow real submission)
-    setUploadProgress(0);
-    setIsUploading(true);
-    const step = () => {
-      setUploadProgress(prev => {
-        if (prev >= 100) { setIsUploading(false); return 100; }
-        return prev + 20;
-      });
-    };
-    const iv = setInterval(() => step(), 80);
-    setTimeout(() => clearInterval(iv), 500);
   };
 
   const handleDrop = (e: DragEvent<HTMLDivElement>) => {
@@ -114,12 +103,8 @@ export function Tdr() {
     }
   };
 
-  // removed simulateUpload — upload progress is shown inline in processFile
-
-
   const handleRemoveFile = () => {
     setFile(null);
-    setUploadProgress(0);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -168,6 +153,7 @@ export function Tdr() {
       const data = await res.json();
       setTdrId(data.tdrId || data.id || null);
       setIsSubmitted(true);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err: any) {
       setSubmitError(err.message || 'Error de red. Por favor intente nuevamente.');
     } finally {
@@ -178,7 +164,6 @@ export function Tdr() {
   const handleReset = () => {
     setIsSubmitted(false);
     setFile(null);
-    setUploadProgress(0);
     setFormData({
       name: '',
       institution: '',
@@ -230,6 +215,12 @@ export function Tdr() {
   }
 
   return (
+    <>
+    <SeoHead
+      title="Presentación de TDR | IZCOR MEDIC"
+      description="Adjunte los Términos de Referencia de su proceso de adquisición y reciba una propuesta técnica y económica de IZCOR MEDIC."
+      canonicalUrl="/tdr"
+    />
     <main className="min-h-screen bg-white py-16 md:py-24">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
         
@@ -339,9 +330,9 @@ export function Tdr() {
             
             {/* Upload Section */}
             <div>
-              <label className="block text-sm font-bold text-slate-700 mb-4">
-                Documento TDR <span className="text-red-500">*</span>
-              </label>
+              <span id="tdr-file-label" className="block text-sm font-bold text-slate-700 mb-4">
+                Documento TDR <span className="text-red-500" aria-hidden="true">*</span>
+              </span>
               
               {!file ? (
                 <div>
@@ -351,7 +342,17 @@ export function Tdr() {
                     onDragLeave={handleDragLeave}
                     onDrop={handleDrop}
                     onClick={() => fileInputRef.current?.click()}
-                    className={`border-2 border-dashed rounded-xl p-12 text-center transition-all cursor-pointer ${
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        fileInputRef.current?.click();
+                      }
+                    }}
+                    role="button"
+                    tabIndex={0}
+                    aria-labelledby="tdr-file-label"
+                    aria-describedby={errors.file ? 'tdr-file-error tdr-file-hint' : 'tdr-file-hint'}
+                    className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-cyan focus-visible:ring-offset-2 border-2 border-dashed rounded-xl p-12 text-center transition-all cursor-pointer ${
                       isDragging 
                         ? 'border-brand-cyan bg-brand-cyan/5 scale-[1.01]' 
                         : errors.file 
@@ -363,11 +364,11 @@ export function Tdr() {
                     <span className="text-brand-navy font-bold text-lg block mb-1">
                       Arrastra tu archivo aquí o haz clic para buscar
                     </span>
-                    <span className="text-slate-500 text-sm">
+                    <span id="tdr-file-hint" className="text-slate-500 text-sm">
                       Solo PDF, DOCX o XLSX (Max. 10MB)
                     </span>
                   </div>
-                  {errors.file && <p className="mt-3 text-sm text-red-500 flex items-center gap-1"><AlertCircle className="w-4 h-4"/>{errors.file}</p>}
+                  {errors.file && <p id="tdr-file-error" role="alert" className="mt-3 text-sm text-red-500 flex items-center gap-1"><AlertCircle className="w-4 h-4"/>{errors.file}</p>}
                 </div>
               ) : (
                 <div className="border border-slate-200 rounded-xl p-6 bg-white shadow-sm flex items-center justify-between">
@@ -390,15 +391,11 @@ export function Tdr() {
                             exit={{ opacity: 0, height: 0 }}
                             className="mt-3"
                           >
-                            <div className="flex justify-between text-xs text-slate-500 mb-1">
-                              <span>Subiendo archivo...</span>
-                              <span>{uploadProgress}%</span>
+                            <div className="text-xs text-slate-500 mb-1">
+                              Enviando archivo...
                             </div>
                             <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                              <div 
-                                className="h-full bg-brand-cyan transition-all duration-200 ease-out"
-                                style={{ width: `${uploadProgress}%` }}
-                              ></div>
+                              <div className="h-full w-1/3 bg-brand-cyan rounded-full animate-pulse" />
                             </div>
                           </motion.div>
                         )}
@@ -412,6 +409,7 @@ export function Tdr() {
                       onClick={handleRemoveFile}
                       className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors flex-shrink-0 ml-4"
                       title="Eliminar archivo"
+                      aria-label={`Quitar archivo ${file.name}`}
                     >
                       <X className="w-5 h-5" />
                     </button>
@@ -425,6 +423,7 @@ export function Tdr() {
                 ref={fileInputRef} 
                 onChange={handleFileChange} 
                 className="hidden" 
+                tabIndex={-1}
                 accept=".pdf,.docx,.xlsx"
               />
             </div>
@@ -460,5 +459,6 @@ export function Tdr() {
         </div>
       </div>
     </main>
+    </>
   );
 }

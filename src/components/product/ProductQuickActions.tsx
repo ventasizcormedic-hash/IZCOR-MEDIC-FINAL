@@ -52,7 +52,7 @@ export const ProductQuickActions: React.FC<ProductQuickActionsProps> = ({
     e.stopPropagation();
     await shareProduct({
       title: product.name,
-      url: `/productos/${product.slug}`,
+      url: `/producto/${product.slug}`,
     });
   };
 

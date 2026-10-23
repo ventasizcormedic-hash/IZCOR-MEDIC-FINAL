@@ -30,7 +30,9 @@ export function MiniCartTray({ isOpen, onClose }: MiniCartTrayProps) {
   // Close on click outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (trayRef.current && !trayRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const toggleBtn = document.getElementById('header-quote-cart-btn');
+      if (trayRef.current && !trayRef.current.contains(target) && !toggleBtn?.contains(target)) {
         onClose();
       }
     };
@@ -49,7 +51,9 @@ export function MiniCartTray({ isOpen, onClose }: MiniCartTrayProps) {
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 8, scale: 0.98 }}
           transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-          className="absolute right-0 top-full mt-2 w-[340px] sm:w-[400px] bg-white rounded-2xl shadow-2xl border border-slate-200/90 overflow-hidden z-50 text-slate-800"
+          role="dialog"
+          aria-label="Bandeja de cotización"
+          className="fixed left-2 right-2 top-[calc(var(--site-header-height,64px)+0.5rem)] sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[400px] bg-white rounded-2xl shadow-2xl border border-slate-200/90 overflow-hidden z-50 text-slate-800"
           id="mini-cart-tray"
         >
           {/* Header */}
@@ -67,7 +71,7 @@ export function MiniCartTray({ isOpen, onClose }: MiniCartTrayProps) {
             <button
               type="button"
               onClick={onClose}
-              className="text-white/60 hover:text-white p-1 rounded-lg hover:bg-white/10 transition-colors"
+              className="text-white/60 hover:text-white p-2 -m-1 rounded-lg hover:bg-white/10 transition-colors"
               aria-label="Cerrar bandeja"
             >
               <X className="w-4 h-4" />
@@ -75,7 +79,7 @@ export function MiniCartTray({ isOpen, onClose }: MiniCartTrayProps) {
           </div>
 
           {/* Body */}
-          <div className="max-h-[380px] overflow-y-auto p-4 space-y-3">
+          <div className="max-h-[min(380px,55vh)] overflow-y-auto p-4 space-y-3">
             {items.length === 0 ? (
               <div className="py-8 px-4 text-center flex flex-col items-center justify-center">
                 <div className="w-14 h-14 rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 mb-3">
@@ -135,21 +139,23 @@ export function MiniCartTray({ isOpen, onClose }: MiniCartTrayProps) {
                     <button
                       type="button"
                       onClick={() => updateQuantity(item.id, -1)}
-                      className="w-5 h-5 flex items-center justify-center text-slate-500 hover:text-slate-900 rounded hover:bg-slate-100 transition-colors"
+                      className="w-8 h-8 flex items-center justify-center text-slate-500 hover:text-slate-900 rounded hover:bg-slate-100 transition-colors"
                       title="Disminuir cantidad"
+                      aria-label={`Disminuir cantidad de ${item.name}`}
                     >
-                      <Minus className="w-3 h-3" />
+                      <Minus className="w-3.5 h-3.5" />
                     </button>
-                    <span className="text-xs font-bold text-slate-800 w-4 text-center">
+                    <span className="text-xs font-bold text-slate-800 min-w-4 text-center" aria-live="polite">
                       {item.quantity}
                     </span>
                     <button
                       type="button"
                       onClick={() => updateQuantity(item.id, 1)}
-                      className="w-5 h-5 flex items-center justify-center text-slate-500 hover:text-slate-900 rounded hover:bg-slate-100 transition-colors"
+                      className="w-8 h-8 flex items-center justify-center text-slate-500 hover:text-slate-900 rounded hover:bg-slate-100 transition-colors"
                       title="Aumentar cantidad"
+                      aria-label={`Aumentar cantidad de ${item.name}`}
                     >
-                      <Plus className="w-3 h-3" />
+                      <Plus className="w-3.5 h-3.5" />
                     </button>
                   </div>
 
@@ -157,8 +163,9 @@ export function MiniCartTray({ isOpen, onClose }: MiniCartTrayProps) {
                   <button
                     type="button"
                     onClick={() => removeItem(item.id)}
-                    className="text-slate-400 hover:text-red-600 p-1.5 rounded-lg hover:bg-red-50 transition-colors shrink-0"
+                    className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-red-600 rounded-lg hover:bg-red-50 transition-colors shrink-0"
                     title="Eliminar ítem"
+                    aria-label={`Eliminar ${item.name} de la bandeja`}
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>

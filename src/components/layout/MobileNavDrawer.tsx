@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { 
   X, ChevronRight, ChevronDown, Search, FileText, 
@@ -7,6 +7,7 @@ import {
   Syringe, Settings, ExternalLink, Sparkles, Newspaper, Users, MapPin, AlertTriangle
 } from 'lucide-react';
 import { Logo } from '../Logo';
+import { useModalBehavior } from '../../hooks/useModalBehavior';
 
 interface MobileNavDrawerProps {
   isOpen: boolean;
@@ -18,6 +19,8 @@ interface MobileNavDrawerProps {
 export function MobileNavDrawer({ isOpen, onClose, onOpenSearch, compareCount }: MobileNavDrawerProps) {
   const location = useLocation();
   const [catalogExpanded, setCatalogExpanded] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useModalBehavior(isOpen, onClose, panelRef);
 
   if (!isOpen) return null;
 
@@ -33,6 +36,8 @@ export function MobileNavDrawer({ isOpen, onClose, onOpenSearch, compareCount }:
   const isHomeActive = location.pathname === '/';
   const isAboutActive = location.pathname === '/nosotros';
   const isCatalogActive = location.pathname.startsWith('/productos') || location.pathname.startsWith('/producto/') || location.pathname.startsWith('/categorias/');
+  const isBrandsActive = location.pathname.startsWith('/marcas');
+  const isMfgActive = location.pathname.startsWith('/fabricantes');
   const isNewsActive = location.pathname === '/noticias';
   const isContactActive = location.pathname === '/contacto';
   const isTdrActive = location.pathname.startsWith('/tdr');
@@ -46,6 +51,10 @@ export function MobileNavDrawer({ isOpen, onClose, onOpenSearch, compareCount }:
       onClick={onClose}
     >
       <div 
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Menú de navegación"
         id="mobile-nav-panel"
         className="w-full max-w-sm bg-white h-full shadow-2xl flex flex-col justify-between overflow-y-auto animate-in slide-in-from-right duration-250"
         onClick={(e) => e.stopPropagation()}
@@ -170,6 +179,29 @@ export function MobileNavDrawer({ isOpen, onClose, onOpenSearch, compareCount }:
             )}
           </div>
 
+          {/* Marcas y Fabricantes */}
+          {[
+            { to: '/marcas', label: 'Marcas', icon: Tag, active: isBrandsActive },
+            { to: '/fabricantes', label: 'Fabricantes', icon: Building, active: isMfgActive },
+          ].map(({ to, label, icon: Icon, active }) => (
+            <Link
+              key={to}
+              to={to}
+              onClick={onClose}
+              className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-bold transition-colors ${
+                active
+                  ? 'bg-[#2C3E50] text-white shadow-2xs'
+                  : 'text-slate-700 hover:bg-slate-100'
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <Icon className="w-4 h-4 text-slate-400" />
+                <span>{label}</span>
+              </span>
+              <ChevronRight className={`w-4 h-4 ${active ? 'text-white' : 'text-slate-400'}`} />
+            </Link>
+          ))}
+
           {/* 4. Noticias */}
           <Link
             to="/noticias"
@@ -248,7 +280,7 @@ export function MobileNavDrawer({ isOpen, onClose, onOpenSearch, compareCount }:
 
           {/* Comparador de equipos */}
           <Link
-            to="/productos"
+            to="/productos?compare=1"
             onClick={onClose}
             className="flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-semibold text-slate-700 hover:bg-slate-100 transition-colors"
           >

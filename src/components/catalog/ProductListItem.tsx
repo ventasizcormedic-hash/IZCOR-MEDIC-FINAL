@@ -92,7 +92,7 @@ export function ProductListItem({
     >
       {/* Product Thumbnail */}
       <Link 
-        to={`/productos/${slug}`}
+        to={`/producto/${slug}`}
         className="w-24 h-24 md:w-32 md:h-32 flex-shrink-0 bg-slate-50 border border-slate-100 rounded-lg p-2.5 flex items-center justify-center overflow-hidden group-hover:border-slate-200 transition-colors relative"
       >
         {imageUrl && !imageError ? (
@@ -164,7 +164,7 @@ export function ProductListItem({
 
         {/* Product Title */}
         <h3 className="text-base md:text-lg font-bold text-slate-900 leading-snug group-hover:text-brand-navy transition-colors mb-2">
-          <Link to={`/productos/${slug}`}>
+          <Link to={`/producto/${slug}`}>
             {name}
           </Link>
         </h3>
@@ -245,7 +245,7 @@ export function ProductListItem({
         <div className="flex items-center gap-2 w-full sm:w-auto">
           {/* Secondary Action: Ver Ficha Técnica */}
           <Link
-            to={`/productos/${slug}`}
+            to={`/producto/${slug}`}
             className="inline-flex items-center justify-center gap-1.5 h-9.5 px-3.5 rounded-xl text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 hover:text-brand-navy active:scale-[0.98] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
             title={`Ver ficha técnica de ${name}`}
           >

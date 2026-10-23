@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { CatalogFacets, Product, CategoryWithSubcategories, Brand } from '../types';
 import { ProductCard } from '../components/ProductCard';
@@ -13,8 +13,15 @@ import { CatalogSkeleton } from '../components/catalog/CatalogSkeleton';
 import { CategoryShowcase } from '../components/catalog/CategoryShowcase';
 import { ComparisonBar } from '../components/catalog/ComparisonBar';
 import { ComparisonModal } from '../components/catalog/ComparisonModal';
+import { FlashNotice } from '../components/common/FlashNotice';
+import { useComparison, MAX_COMPARISON_ITEMS } from '../hooks/useComparison';
 import { ViewMode, SortOption, ComparisonProduct } from '../components/catalog/types';
 import { SeoHead } from '../components/seo/SeoHead';
+
+const toPositiveInt = (value: string | null, fallback: number) => {
+  const n = parseInt(value || '', 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+};
 
 export function Catalog() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -29,8 +36,8 @@ export function Catalog() {
   const paramVerification = searchParams.get('verification') || '';
   const paramProcedencia = searchParams.get('procedencia') || '';
   const paramSort = (searchParams.get('sort') as SortOption) || 'recent';
-  const paramPage = parseInt(searchParams.get('page') || '1', 10);
-  const paramLimit = parseInt(searchParams.get('limit') || '24', 10);
+  const paramPage = toPositiveInt(searchParams.get('page'), 1);
+  const paramLimit = Math.min(100, toPositiveInt(searchParams.get('limit'), 24));
   const paramView = (searchParams.get('view') as ViewMode) || 'grid';
 
   // Local state
@@ -66,47 +73,30 @@ export function Catalog() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Comparison state (persistent in localStorage)
-  const [comparisonList, setComparisonList] = useState<ComparisonProduct[]>(() => {
-    try {
-      const saved = localStorage.getItem('izcor_product_comparison');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-  const [isComparisonModalOpen, setIsComparisonModalOpen] = useState(false);
+  // Comparison state (shared with header and product page, persisted in localStorage)
+  const { list: comparisonList, toggle: toggleCompare, remove: handleRemoveCompare, clear: handleClearCompare } = useComparison();
+  // ?compare=1 (header shortcut) opens the comparison matrix directly.
+  const [isComparisonModalOpen, setIsComparisonModalOpen] = useState(() => searchParams.get('compare') === '1');
+  const [notice, setNotice] = useState<string | null>(null);
+  const dismissNotice = useCallback(() => setNotice(null), []);
 
-  // Save comparison list
   useEffect(() => {
-    try {
-      localStorage.setItem('izcor_product_comparison', JSON.stringify(comparisonList));
-    } catch (e) {
-      console.error(e);
+    if (searchParams.get('compare') === '1') {
+      setIsComparisonModalOpen(comparisonList.length > 0);
+      if (comparisonList.length === 0) {
+        setNotice('Aún no hay equipos en comparación. Use el botón "Comparar" de cada producto.');
+      }
+      const next = new URLSearchParams(searchParams);
+      next.delete('compare');
+      setSearchParams(next, { replace: true });
     }
-  }, [comparisonList]);
+  }, [searchParams]);
 
   const handleToggleCompare = useCallback((item: ComparisonProduct) => {
-    setComparisonList(prev => {
-      const exists = prev.some(p => p.id === item.id);
-      if (exists) {
-        return prev.filter(p => p.id !== item.id);
-      }
-      if (prev.length >= 4) {
-        alert('Puede comparar un máximo de 4 equipos médicos simultáneamente.');
-        return prev;
-      }
-      return [...prev, item];
-    });
-  }, []);
-
-  const handleRemoveCompare = useCallback((id: number) => {
-    setComparisonList(prev => prev.filter(p => p.id !== id));
-  }, []);
-
-  const handleClearCompare = useCallback(() => {
-    setComparisonList([]);
-  }, []);
+    if (!toggleCompare(item)) {
+      setNotice(`Puede comparar un máximo de ${MAX_COMPARISON_ITEMS} equipos a la vez. Quite uno para agregar otro.`);
+    }
+  }, [toggleCompare]);
 
   // 1. Fetch Facets on mount
   useEffect(() => {
@@ -130,6 +120,8 @@ export function Catalog() {
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
+  const lastSyncedSearch = useRef(paramSearch);
+
   // 3. Keep state synced when searchParams change externally (e.g. Back/Forward)
   useEffect(() => {
     setSelectedCategory(searchParams.get('category') || '');
@@ -140,13 +132,28 @@ export function Catalog() {
     setSelectedVerification(searchParams.get('verification') || '');
     setSelectedProcedencia(searchParams.get('procedencia') || '');
     setSort((searchParams.get('sort') as SortOption) || 'recent');
-    setCurrentPage(parseInt(searchParams.get('page') || '1', 10));
-    setItemsPerPage(parseInt(searchParams.get('limit') || '24', 10));
+    setCurrentPage(toPositiveInt(searchParams.get('page'), 1));
+    setItemsPerPage(Math.min(100, toPositiveInt(searchParams.get('limit'), 24)));
     setViewMode((searchParams.get('view') as ViewMode) || 'grid');
     const s = searchParams.get('search') || '';
-    setSearchTerm(s);
-    setDebouncedSearch(s);
+    // Only overwrite the input when the search changed outside of typing (Back/Forward, links).
+    if (s !== lastSyncedSearch.current) {
+      lastSyncedSearch.current = s;
+      setSearchTerm(s);
+      setDebouncedSearch(s);
+    }
   }, [searchParams]);
+
+  // Mirror the debounced search into the URL so refresh, Back and shared links keep it.
+  useEffect(() => {
+    if (debouncedSearch === (searchParams.get('search') || '')) return;
+    lastSyncedSearch.current = debouncedSearch;
+    const next = new URLSearchParams(searchParams);
+    if (debouncedSearch) next.set('search', debouncedSearch); else next.delete('search');
+    next.delete('page');
+    setCurrentPage(1);
+    setSearchParams(next, { replace: true });
+  }, [debouncedSearch]);
 
   // 4. Helper to update URL params cleanly
   const syncToUrl = useCallback((updates: Partial<{
@@ -199,7 +206,9 @@ export function Catalog() {
   ]);
 
   // 5. Fetch Products on query parameters change
+  const [reloadKey, setReloadKey] = useState(0);
   useEffect(() => {
+    const controller = new AbortController();
     setLoading(true);
     setError(null);
 
@@ -220,7 +229,7 @@ export function Catalog() {
     }
     if (sort) query.set('sort', sort);
 
-    fetch(`/api/products?${query.toString()}`)
+    fetch(`/api/products?${query.toString()}`, { signal: controller.signal })
       .then(res => {
         if (!res.ok) throw new Error(`HTTP Error: ${res.status}`);
         return res.json();
@@ -238,14 +247,17 @@ export function Catalog() {
         setLoading(false);
       })
       .catch(err => {
+        if (err.name === 'AbortError') return;
         console.error('Error fetching products:', err);
         setError('No se pudo cargar el listado de productos médicos.');
+        setProducts([]);
         setLoading(false);
       });
+    return () => controller.abort();
   }, [
     debouncedSearch, selectedCategory, selectedSubcategory, 
     selectedBrand, selectedManufacturer, selectedApplication, 
-    selectedVerification, selectedProcedencia, sort, currentPage, itemsPerPage
+    selectedVerification, selectedProcedencia, sort, currentPage, itemsPerPage, reloadKey
   ]);
 
   // Actions
@@ -336,7 +348,8 @@ export function Catalog() {
   const activeCategoryName = useMemo(() => {
     if (!selectedCategory) return null;
     const cat = facets.categories.find(
-      c => c.id.toString() === selectedCategory || c.slug === selectedCategory
+      c => c.id.toString() === selectedCategory || c.slug === selectedCategory ||
+        c.name.toLowerCase() === selectedCategory.toLowerCase()
     );
     return cat?.name || null;
   }, [selectedCategory, facets.categories]);
@@ -357,7 +370,8 @@ export function Catalog() {
   const activeBrandName = useMemo(() => {
     if (!selectedBrand) return null;
     const br = facets.brands.find(
-      b => b.id.toString() === selectedBrand || b.slug === selectedBrand
+      b => b.id.toString() === selectedBrand || b.slug === selectedBrand ||
+        b.name.toLowerCase() === selectedBrand.toLowerCase()
     );
     return br?.name || null;
   }, [selectedBrand, facets.brands]);
@@ -482,14 +496,19 @@ export function Catalog() {
             </div>
 
             {/* Error notice if API fails */}
-            {error && (
-              <div className="p-4 mb-6 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold">
-                {error}
-              </div>
-            )}
-
             {/* Products Stream */}
-            {loading ? (
+            {error && !loading ? (
+              <div role="alert" className="p-6 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-sm font-semibold flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <span>{error} Verifique su conexión e intente nuevamente.</span>
+                <button
+                  type="button"
+                  onClick={() => setReloadKey(k => k + 1)}
+                  className="h-10 px-5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shrink-0"
+                >
+                  Reintentar
+                </button>
+              </div>
+            ) : loading ? (
               <CatalogSkeleton viewMode={viewMode} count={itemsPerPage > 12 ? 12 : itemsPerPage} />
             ) : products.length > 0 ? (
               <>
@@ -595,6 +614,8 @@ export function Catalog() {
         hasActiveFilters={hasActiveFilters}
         totalResults={totalProducts}
       />
+
+      <FlashNotice message={notice} onDismiss={dismissNotice} />
 
       {/* Floating Bottom Comparison Dock */}
       <ComparisonBar

@@ -25,7 +25,7 @@ export const ProductIdentity: React.FC<ProductIdentityProps> = ({ product }) => 
         {/* Brand Pill with optional real logo */}
         {brandDisplay && (
           <Link
-            to={`/productos?brand=${encodeURIComponent(brandDisplay)}`}
+            to={`/productos?brand=${encodeURIComponent(product.brandSlug || brandDisplay)}`}
             className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-bold uppercase tracking-wider bg-brand-navy text-white hover:bg-brand-navy-light transition-colors shadow-2xs"
             title={`Ver todos los productos de la marca ${brandDisplay}`}
           >
@@ -45,7 +45,7 @@ export const ProductIdentity: React.FC<ProductIdentityProps> = ({ product }) => 
         {/* Clinical Category */}
         {product.categoryName && (
           <Link
-            to={`/productos?category=${encodeURIComponent(product.categoryName)}`}
+            to={product.categorySlug ? `/categorias/${product.categorySlug}` : `/productos?category=${encodeURIComponent(product.categoryName)}`}
             className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 hover:text-slate-900 border border-slate-200 transition-colors"
           >
             <Layers className="w-3.5 h-3.5 text-slate-500" />

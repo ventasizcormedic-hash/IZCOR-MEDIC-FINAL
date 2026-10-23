@@ -38,10 +38,11 @@ export const ProductStickyBar: React.FC<ProductStickyBarProps> = ({ product, mai
 
   return (
     <>
-      {/* Desktop Top Floating Sticky Bar */}
+      {/* Desktop Bottom Floating Sticky Bar (bottom, so it never covers the site header or section nav) */}
       <div
-        className={`hidden md:block fixed top-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-md transition-all duration-300 transform ${
-          showSticky ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0 pointer-events-none'
+        aria-hidden={!showSticky}
+        className={`hidden md:block fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] transition-all duration-300 transform ${
+          showSticky ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0 pointer-events-none invisible'
         }`}
       >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2.5 flex items-center justify-between gap-4">
@@ -99,7 +100,7 @@ export const ProductStickyBar: React.FC<ProductStickyBarProps> = ({ product, mai
       </div>
 
       {/* Mobile Bottom Fixed Action Bar */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-200 p-3 shadow-lg z-40 flex items-center gap-2">
+      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-200 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-lg z-40 flex items-center gap-2">
         <Link
           to={`/cotizar?product=${product.id}`}
           className="flex-1 h-11 flex items-center justify-center gap-2 px-3 bg-brand-navy hover:bg-brand-navy-light text-white rounded-xl font-bold text-xs active:bg-brand-cyan active:scale-[0.98] transition-all shadow-xs"

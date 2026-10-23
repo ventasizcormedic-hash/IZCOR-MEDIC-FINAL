@@ -6,7 +6,8 @@ import { Footer } from './components/layout/Footer';
 import { WhatsAppButton } from './components/WhatsAppButton';
 import { QuoteProvider } from './context/QuoteContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { useAnalytics } from './hooks/useAnalytics';
+import { usePageViewTracking } from './hooks/useAnalytics';
+import { ScrollToTop } from './components/layout/ScrollToTop';
 const Home = lazy(() => import('./pages/Home').then(module => ({ default: module.Home })));
 const Catalog = lazy(() => import('./pages/Catalog').then(module => ({ default: module.Catalog })));
 const CategoryDetail = lazy(() => import('./pages/CategoryDetail').then(module => ({ default: module.CategoryDetail })));
@@ -29,7 +30,7 @@ function RouteFallback() {
 }
 
 function PublicLayout() {
-  useAnalytics(); // Inicia el tracking de vistas de página
+  usePageViewTracking();
 
   return (
     <div className="min-h-screen flex flex-col font-sans relative">
@@ -55,9 +56,10 @@ export default function App() {
     <HelmetProvider>
       <QuoteProvider>
         <BrowserRouter>
+          <ScrollToTop />
           <Suspense fallback={<RouteFallback />}>
             <Routes>
-              <Route path="/admin/*" element={<Admin />} />
+              <Route path="/admin/*" element={<ErrorBoundary><Admin /></ErrorBoundary>} />
               <Route element={<PublicLayout />}>
                 <Route path="/" element={<Home />} />
                 <Route path="/nosotros" element={<About />} />

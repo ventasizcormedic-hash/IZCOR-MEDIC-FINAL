@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { 
   FileText, ShieldCheck, Download, MessageCircle, 
@@ -25,6 +25,8 @@ import { ProductSkeleton } from '../components/product/ProductSkeleton';
 import { ProductNotFound } from '../components/product/ProductNotFound';
 import { SeoHead } from '../components/seo/SeoHead';
 import { useAnalytics } from '../hooks/useAnalytics';
+import { useComparison, MAX_COMPARISON_ITEMS } from '../hooks/useComparison';
+import { FlashNotice } from '../components/common/FlashNotice';
 
 export function ProductDetail() {
   const { slug } = useParams<{ slug: string }>();
@@ -33,39 +35,28 @@ export function ProductDetail() {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<boolean>(false);
   const [descExpanded, setDescExpanded] = useState<boolean>(false);
-  const [comparisonList, setComparisonList] = useState<any[]>(() => {
-    try {
-      const saved = localStorage.getItem('izcor_product_comparison');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
+  const { list: comparisonList, toggle: toggleCompare } = useComparison();
+  const [notice, setNotice] = useState<string | null>(null);
+  const dismissNotice = useCallback(() => setNotice(null), []);
+  const sectionNavRef = useRef<HTMLDivElement>(null);
 
   const handleToggleCompare = (prod: any) => {
-    setComparisonList((prev) => {
-      let updated: any[];
-      if (prev.some((p) => p.id === prod.id)) {
-        updated = prev.filter((p) => p.id !== prod.id);
-      } else {
-        if (prev.length >= 4) {
-          alert('Puedes comparar hasta 4 productos a la vez.');
-          return prev;
-        }
-        updated = [...prev, prod];
-      }
-      try {
-        localStorage.setItem('izcor_product_comparison', JSON.stringify(updated));
-        window.dispatchEvent(new Event('storage'));
-      } catch (err) {
-        console.error('Failed to sync comparison', err);
-      }
-      return updated;
-    });
+    // Store the full product so the comparison matrix has specs to show.
+    const full = product && product.id === prod.id ? {
+      ...prod,
+      catalogNumber: product.catalogNumber,
+      manufacturer: product.manufacturer,
+      technicalSpecs: product.technicalSpecs,
+      application: product.application,
+      verificationStatus: product.verificationStatus,
+      presentation: product.presentation,
+    } : prod;
+    if (!toggleCompare(full)) {
+      setNotice(`Puede comparar un máximo de ${MAX_COMPARISON_ITEMS} equipos a la vez. Quite uno para agregar otro.`);
+    }
   };
 
   useEffect(() => {
-    window.scrollTo({ top: 0, behavior: 'instant' });
     setLoading(true);
     setError(false);
 
@@ -107,7 +98,7 @@ export function ProductDetail() {
         "@context": "https://schema.org/",
         "@type": "Product",
         "name": product.name,
-        "image": product.images?.[0] || undefined,
+        "image": product.images?.[0]?.url || undefined,
         "description": product.description || description,
         "brand": {
           "@type": "Brand",
@@ -180,8 +171,10 @@ export function ProductDetail() {
   const scrollToSection = (id: string) => {
     const el = document.getElementById(id);
     if (el) {
-      const yOffset = -80;
-      const y = el.getBoundingClientRect().top + window.pageYOffset + yOffset;
+      // Leave room for the sticky site header and the sticky section nav.
+      const headerHeight = document.getElementById('main-sticky-header')?.offsetHeight ?? 0;
+      const navHeight = sectionNavRef.current?.offsetHeight ?? 0;
+      const y = el.getBoundingClientRect().top + window.pageYOffset - headerHeight - navHeight - 12;
       window.scrollTo({ top: y, behavior: 'smooth' });
     }
   };
@@ -280,7 +273,7 @@ export function ProductDetail() {
 
         {/* 3. Internal Section Navigation Bar (Rendered only if multiple content sections exist) */}
         {showSectionNav && (
-          <div className="sticky top-0 z-30 mb-8 -mx-4 sm:mx-0 px-4 sm:px-0 bg-[#F8FAFC]/95 backdrop-blur-xs py-2 border-b border-slate-200">
+          <div ref={sectionNavRef} className="sticky top-[var(--site-header-height,0px)] z-30 mb-8 -mx-4 sm:mx-0 px-4 sm:px-0 bg-[#F8FAFC]/95 backdrop-blur-xs py-2 border-b border-slate-200">
             <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin text-xs font-bold text-slate-600">
               <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-1 hidden sm:inline">
                 Secciones:
@@ -444,6 +437,7 @@ export function ProductDetail() {
               <ProductRelated
                 relatedProducts={product.relatedProducts}
                 categoryName={product.categoryName}
+                categorySlug={product.categorySlug}
               />
             </section>
           )}
@@ -451,6 +445,8 @@ export function ProductDetail() {
         </div>
 
       </div>
+
+      <FlashNotice message={notice} onDismiss={dismissNotice} />
 
       {/* 5. Sticky Floating Header / Mobile Bottom Bar */}
       <ProductStickyBar 

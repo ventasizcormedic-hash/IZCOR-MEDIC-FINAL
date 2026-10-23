@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useModalBehavior } from '../../hooks/useModalBehavior';
 import { 
   Search, X, Loader2, Package, Tag, Layers, 
   Building2, ChevronRight, ArrowRight, CornerDownLeft, Sparkles 
@@ -38,6 +39,8 @@ export function HeaderSearchModal({ isOpen, onClose }: HeaderSearchModalProps) {
     manufacturers: [],
   });
   const inputRef = useRef<HTMLInputElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  useModalBehavior(isOpen, onClose, contentRef, { initialFocusRef: inputRef });
 
   // Focus input on open
   useEffect(() => {
@@ -51,27 +54,7 @@ export function HeaderSearchModal({ isOpen, onClose }: HeaderSearchModalProps) {
     }
   }, [isOpen]);
 
-  // Global ESC shortcut
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) {
-        onClose();
-      }
-      // Open with Ctrl+K or Cmd+K
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        if (isOpen) {
-          onClose();
-        } else {
-          // Open
-          const searchBtn = document.getElementById('header-search-btn');
-          searchBtn?.click();
-        }
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+  // Escape and Ctrl/Cmd+K are handled by useModalBehavior and the Header respectively.
 
   // Fetch suggestions
   useEffect(() => {
@@ -145,6 +128,10 @@ export function HeaderSearchModal({ isOpen, onClose }: HeaderSearchModalProps) {
       onClick={onClose}
     >
       <div 
+        ref={contentRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Buscar en el catálogo"
         id="header-search-modal-content"
         className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden relative animate-in zoom-in-95 duration-150"
         onClick={(e) => e.stopPropagation()}
@@ -163,6 +150,7 @@ export function HeaderSearchModal({ isOpen, onClose }: HeaderSearchModalProps) {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Buscar equipo, modelo, SKU, marca o fabricante..."
+              aria-label="Buscar equipo, modelo, SKU, marca o fabricante"
               className="w-full bg-transparent text-sm md:text-base font-semibold text-slate-900 placeholder:text-slate-400 focus:outline-none"
               autoComplete="off"
             />
@@ -177,6 +165,7 @@ export function HeaderSearchModal({ isOpen, onClose }: HeaderSearchModalProps) {
                 onClick={() => setQuery('')}
                 className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 transition-colors"
                 title="Limpiar búsqueda"
+                aria-label="Limpiar búsqueda"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -187,6 +176,7 @@ export function HeaderSearchModal({ isOpen, onClose }: HeaderSearchModalProps) {
               onClick={onClose}
               className="px-2 py-1 bg-slate-200/80 hover:bg-slate-300 text-slate-600 rounded-lg text-xs font-mono font-medium transition-colors"
               title="Cerrar búsqueda (Esc)"
+              aria-label="Cerrar búsqueda"
             >
               ESC
             </button>

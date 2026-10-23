@@ -42,26 +42,26 @@ export function ComparisonBar({
           </div>
 
           {/* Mini product avatars */}
-          <div className="flex items-center -space-x-2 ml-auto sm:ml-2">
+          <div className="flex items-center gap-2.5 ml-auto sm:ml-2 pt-1">
             {products.map((p) => (
-              <div 
-                key={p.id}
-                className="relative group w-9 h-9 rounded-lg bg-white p-1 border-2 border-brand-navy overflow-hidden shadow-xs"
-                title={p.name}
-              >
-                {p.imageUrl ? (
-                  <img src={p.imageUrl} alt={p.name} className="w-full h-full object-contain" />
-                ) : (
-                  <div className="w-full h-full bg-slate-100 flex items-center justify-center text-[9px] font-bold text-slate-600">
-                    {p.name.slice(0, 2).toUpperCase()}
-                  </div>
-                )}
+              <div key={p.id} className="relative" title={p.name}>
+                <div className="w-9 h-9 rounded-lg bg-white p-1 border-2 border-brand-navy overflow-hidden shadow-xs">
+                  {p.imageUrl ? (
+                    <img src={p.imageUrl} alt={p.name} className="w-full h-full object-contain" />
+                  ) : (
+                    <div className="w-full h-full bg-slate-100 flex items-center justify-center text-[9px] font-bold text-slate-600">
+                      {p.name.slice(0, 2).toUpperCase()}
+                    </div>
+                  )}
+                </div>
+                {/* Always visible so touch users can remove items too */}
                 <button
+                  type="button"
                   onClick={() => onRemoveProduct(p.id)}
-                  aria-label="Quitar producto"
-                  className="absolute inset-0 bg-rose-900/80 text-white opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
+                  aria-label={`Quitar ${p.name} de la comparación`}
+                  className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-rose-600 hover:bg-rose-700 text-white flex items-center justify-center shadow ring-2 ring-brand-navy focus-visible:outline-none focus-visible:ring-white"
                 >
-                  <X className="w-3.5 h-3.5" />
+                  <X className="w-3 h-3" />
                 </button>
               </div>
             ))}

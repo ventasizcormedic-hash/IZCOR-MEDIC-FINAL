@@ -122,24 +122,43 @@ async function startServer() {
         email: String(email).trim(),
         phone: String(phone).trim(),
         city: region ? String(region).trim() : null,
-        message: notes ? String(notes).trim() : (ruc ? `RUC: ${ruc}` : null),
+        message: [ruc ? `RUC: ${String(ruc).trim()}` : '', notes ? String(notes).trim() : '']
+          .filter(Boolean).join('\n') || null,
         status: 'NEW',
       }).returning();
 
       const createdQuote = quoteResult[0];
 
+      // Items whose product row can't be linked (deleted/unknown id) are kept as
+      // text in the quote message so the request is never silently incomplete.
+      const unlinkedItems: string[] = [];
       if (Array.isArray(items) && items.length > 0) {
         for (const itm of items) {
           const pId = Number(itm.productId || itm.id);
-          if (!isNaN(pId)) {
+          const qty = Math.max(1, Number(itm.quantity) || 1);
+          const label = `${itm.productName || itm.name || `Producto #${itm.productId || itm.id}`}${itm.model ? ` (Mod: ${itm.model})` : ''} x${qty}`;
+          if (isNaN(pId)) {
+            unlinkedItems.push(label);
+            continue;
+          }
+          try {
             await db.insert(quoteItems).values({
               quoteId: createdQuote.id,
               productId: pId,
-              quantity: Math.max(1, Number(itm.quantity) || 1),
+              quantity: qty,
               notes: itm.notes ? String(itm.notes).trim() : null,
-            }).onConflictDoNothing().catch(() => {});
+            }).onConflictDoNothing();
+          } catch (itemErr: any) {
+            console.warn(`Quote ${createdQuote.id}: could not link item ${pId}:`, itemErr.message);
+            unlinkedItems.push(label);
           }
         }
+      }
+      if (unlinkedItems.length > 0) {
+        const extra = `Equipos solicitados (sin vínculo al catálogo):\n- ${unlinkedItems.join('\n- ')}`;
+        await db.update(quotes)
+          .set({ message: createdQuote.message ? `${createdQuote.message}\n\n${extra}` : extra })
+          .where(eq(quotes.id, createdQuote.id));
       }
 
       res.status(201).json({
@@ -227,6 +246,11 @@ async function startServer() {
       const rawBase64 = fileBase64 || fileData || null;
       let storedFileUrl: string | null = null;
       if (rawBase64 && fileName) {
+        // Uploads land in a public folder: only accept the document types the form offers.
+        const ext = path.extname(String(fileName)).toLowerCase();
+        if (!['.pdf', '.docx', '.xlsx'].includes(ext)) {
+          return res.status(400).json({ error: "Formato de archivo no permitido. Solo PDF, DOCX o XLSX." });
+        }
         const tdrUploadDir = path.resolve(projectRoot, 'public', 'uploads', 'tdr');
         if (!fs.existsSync(tdrUploadDir)) {
           fs.mkdirSync(tdrUploadDir, { recursive: true });
@@ -297,8 +321,8 @@ async function startServer() {
   app.post("/api/contact", async (req, res) => {
     try {
       const { name, institution, email, phone, subject, message } = req.body;
-      if (!name || !email) {
-        return res.status(400).json({ error: "Nombre y correo son obligatorios." });
+      if (!String(name || '').trim() || !String(email || '').trim() || !String(phone || '').trim() || !String(message || '').trim()) {
+        return res.status(400).json({ error: "Nombre, correo, teléfono y mensaje son obligatorios." });
       }
 
       await db.insert(quotes).values({
@@ -308,7 +332,7 @@ async function startServer() {
         phone: phone ? String(phone).trim() : null,
         message: `[CONTACTO - ${subject || 'Consulta General'}]: ${message || ''}`,
         status: 'NEW',
-      }).catch(err => console.warn("Contact quote log note:", err.message));
+      });
 
       res.json({
         success: true,
@@ -338,7 +362,7 @@ async function startServer() {
         });
       }
 
-      const reportCode = `FV-${Date.now().toString().slice(-6)}`;
+      const reportCode = `FV-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 
       const [report] = await db.insert(pharmacovigilanceReports).values({
         reportCode,
@@ -1588,7 +1612,8 @@ ${urls}
       const limitNum = Math.min(100, Math.max(1, parseInt(String(limit), 10) || 24));
       const offset = (pageNum - 1) * limitNum;
 
-      let conditions: any[] = [];
+      // Public catalog: only published products, consistent with facets and suggestions.
+      let conditions: any[] = [eq(products.publicationStatus, 'PUBLISHED')];
       
       if (search) {
         const query = `%${String(search).trim()}%`;
@@ -1630,7 +1655,10 @@ ${urls}
             ));
           }
         } else {
-          const cat = await db.select().from(categories).where(eq(categories.slug, catVal)).limit(1);
+          // Accept slug, or the category name for links built from display names.
+          const cat = await db.select().from(categories)
+            .where(or(eq(categories.slug, catVal), ilike(categories.name, catVal.trim())))
+            .limit(1);
           if (cat.length > 0) {
             const catId = cat[0].id;
             const childCats = await db.select({ id: categories.id }).from(categories).where(eq(categories.parentId, catId));
@@ -1652,7 +1680,9 @@ ${urls}
             eq(products.categoryId, subNum)
           ));
         } else {
-          const sub = await db.select().from(categories).where(eq(categories.slug, subVal)).limit(1);
+          const sub = await db.select().from(categories)
+            .where(or(eq(categories.slug, subVal), ilike(categories.name, subVal.trim())))
+            .limit(1);
           if (sub.length > 0) {
             conditions.push(or(
               eq(products.subcategoryId, sub[0].id),
@@ -1668,7 +1698,9 @@ ${urls}
         if (!isNaN(brandNum)) {
           conditions.push(eq(products.brandId, brandNum));
         } else {
-          const br = await db.select().from(brands).where(eq(brands.slug, brandVal)).limit(1);
+          const br = await db.select().from(brands)
+            .where(or(eq(brands.slug, brandVal), ilike(brands.name, brandVal.trim())))
+            .limit(1);
           if (br.length > 0) {
             conditions.push(eq(products.brandId, br[0].id));
           }
@@ -1861,7 +1893,7 @@ ${urls}
       .from(products)
       .leftJoin(brands, eq(products.brandId, brands.id))
       .leftJoin(categories, eq(products.categoryId, categories.id))
-      .where(condition)
+      .where(and(condition, eq(products.publicationStatus, 'PUBLISHED')))
       .limit(1);
 
       if (product.length === 0) {

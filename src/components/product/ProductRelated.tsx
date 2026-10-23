@@ -6,11 +6,13 @@ import { RelatedProductItem } from './types';
 interface ProductRelatedProps {
   relatedProducts?: RelatedProductItem[];
   categoryName?: string | null;
+  categorySlug?: string | null;
 }
 
 export const ProductRelated: React.FC<ProductRelatedProps> = ({
   relatedProducts,
   categoryName,
+  categorySlug,
 }) => {
   if (!relatedProducts || relatedProducts.length === 0) {
     return null;
@@ -35,7 +37,7 @@ export const ProductRelated: React.FC<ProductRelatedProps> = ({
 
         {categoryName && (
           <Link
-            to={`/productos?category=${encodeURIComponent(categoryName)}`}
+            to={categorySlug ? `/categorias/${categorySlug}` : `/productos?category=${encodeURIComponent(categoryName)}`}
             className="hidden sm:inline-flex items-center gap-1 text-xs font-bold text-brand-navy hover:underline"
           >
             <span>Ver más en {categoryName}</span>
@@ -48,7 +50,7 @@ export const ProductRelated: React.FC<ProductRelatedProps> = ({
         {relatedProducts.map((rel) => (
           <Link
             key={rel.id}
-            to={`/productos/${rel.slug}`}
+            to={`/producto/${rel.slug}`}
             className="group p-4 rounded-xl border border-slate-200 bg-white hover:border-brand-navy hover:shadow-md transition-all flex flex-col justify-between"
           >
             <div>
