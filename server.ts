@@ -32,6 +32,15 @@ const projectRoot = (() => {
 
 process.chdir(projectRoot);
 
+// URL slug that keeps Spanish words readable: "Diagnóstico" -> "diagnostico" (not "diagn-stico").
+const slugify = (value: string) =>
+  value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)+/g, '');
+
 async function startServer() {
   // Initialize database engine (PostgreSQL or PGlite) and auto-seed if required
   await initDatabase();
@@ -88,6 +97,27 @@ async function startServer() {
     fs.mkdirSync(uploadsDir, { recursive: true });
   }
   app.use('/uploads', express.static(uploadsDir));
+
+  // Checks that a URL answers (HEAD, falling back to GET) within a few seconds.
+  const probeUrl = async (url: string): Promise<{ ok: boolean; status?: number; error?: string }> => {
+    if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+    const attempt = async (method: 'HEAD' | 'GET') => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8000);
+      try {
+        return await fetch(url, { method, redirect: 'follow', signal: controller.signal, headers: { 'User-Agent': 'Mozilla/5.0 (IZCOR MEDIC link check)' } });
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+    try {
+      let response = await attempt('HEAD');
+      if (response.status === 405 || response.status === 403 || response.status === 501) response = await attempt('GET');
+      return response.ok ? { ok: true, status: response.status } : { ok: false, status: response.status, error: `HTTP ${response.status}` };
+    } catch (e: any) {
+      return { ok: false, error: e.name === 'AbortError' ? 'tiempo de espera agotado' : (e.cause?.code || e.message) };
+    }
+  };
 
   // Every admin API requires a signed-in user with an ADMIN or SUPER_ADMIN role.
   app.use('/api/admin', requireAuth, requireAdmin);
@@ -2069,6 +2099,7 @@ ${urls}
   // Admin Routes (Requires Auth, basic implementation)
   app.get("/api/admin/dashboard", requireAuth, async (req: AuthRequest, res) => {
     try {
+      const queryStartedAt = Date.now();
       const now = new Date();
       const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       const startOfWeek = new Date(now);
@@ -2115,7 +2146,21 @@ ${urls}
       const reviewProducts = Number(reviewRes[0]?.count || 0);
       const outdatedProducts = Number(outdatedRes[0]?.count || 0);
       const publishedProducts = Number(publishedRes[0]?.count || 0);
-      const autoVerifiedCount = Math.max(0, Math.floor(verifiedProducts * 0.88)); // Auto-verified portion
+      // Data-quality figures computed from the catalog itself.
+      const [qualityRow] = (await db.select({
+        autoVerified: sql<number>`count(*) filter (where ${products.verifiedBy} = 'AUTONOMOUS_ENGINE')`,
+        avgScore: sql<number>`coalesce(round(avg(${products.validationScore}) filter (where ${products.validationScore} > 0)), 0)`,
+        withSpecs: sql<number>`count(*) filter (where coalesce(trim(${products.technicalSpecs}), '') <> '')`,
+        withSource: sql<number>`count(*) filter (where coalesce(trim(${products.sourceUrl}), '') <> '')`,
+        withImage: sql<number>`count(*) filter (where exists (select 1 from ${productImages} where ${productImages.productId} = ${products.id}))`,
+        incomplete: sql<number>`count(*) filter (where coalesce(trim(${products.model}), '') = '' or coalesce(trim(${products.technicalSpecs}), '') = '')`,
+      }).from(products)) as any[];
+      const pct = (n: number) => (totalProducts > 0 ? Math.round((Number(n) / totalProducts) * 100) : 0);
+      const autoVerifiedCount = Number(qualityRow?.autoVerified || 0);
+      const specsRatio = pct(qualityRow?.withSpecs || 0);
+      const traceabilityRatio = pct(qualityRow?.withSource || 0);
+      const imagesRatio = pct(qualityRow?.withImage || 0);
+      const freshnessRatio = totalProducts > 0 ? Math.round(((totalProducts - outdatedProducts) / totalProducts) * 100) : 0;
 
       // Autonomous mode settings
       const autoSettings = (await db.select().from(autonomousSettings).limit(1))[0];
@@ -2190,15 +2235,15 @@ ${urls}
         activeJobs: Number(jobsRes[0]?.count || 0),
         possibleDuplicates: pendingDups,
         quality: {
-          avgScore: 92,
+          avgScore: Number(qualityRow?.avgScore || 0),
           openIssues: reviewProducts + pendingDups,
           criticalIssues: reviewProducts,
-          incompleteProducts: Math.floor(draftProducts * 0.4),
-          completenessRatio: 94,
-          traceabilityRatio: 99,
-          imagesRatio: 97,
-          specsRatio: 91,
-          freshnessRatio: 89,
+          incompleteProducts: Number(qualityRow?.incomplete || 0),
+          completenessRatio: Math.round((specsRatio + imagesRatio + traceabilityRatio) / 3),
+          traceabilityRatio,
+          imagesRatio,
+          specsRatio,
+          freshnessRatio,
         },
         automation: {
           activeJobs: Number(jobsRes[0]?.count || 0),
@@ -2210,16 +2255,11 @@ ${urls}
         },
         system: {
           status: 'HEALTHY',
-          latencyMs: 38,
-          errorRate: 0.1,
-          cacheHitRatio: 88,
-          workers: 4,
+          // Measured: time this dashboard took to query the database.
+          latencyMs: Date.now() - queryStartedAt,
+          cacheHitRatio: Math.round(cacheEngine.getStats().hitRatio),
         },
-        recentActivity: recentAudit.length > 0 ? recentAudit : [
-          { id: 1, action: 'AUTO_VERIFIED', decision: 'AUTO_PUBLISHED', timestamp: new Date(Date.now() - 1000 * 60 * 14), evidenceSummary: 'Producto validado automáticamente con evidencia completa.' },
-          { id: 2, action: 'DISCOVERY', decision: 'DRAFT_CREATED', timestamp: new Date(Date.now() - 1000 * 60 * 42), evidenceSummary: 'Nueva ficha técnica extraída desde fuente oficial Alkofarma.' },
-          { id: 3, action: 'EXTRACTION', decision: 'SOURCE_SYNCED', timestamp: new Date(Date.now() - 1000 * 60 * 120), evidenceSummary: 'Sitemap procesado con 18 items detectados.' }
-        ],
+        recentActivity: recentAudit,
         priorityAlerts,
       };
 
@@ -2372,7 +2412,7 @@ ${urls}
       const productId = Number(req.params.id);
       const { verificationStatus } = req.body;
 
-      if (!['VERIFIED', 'DRAFT', 'PENDING REVIEW', 'REJECTED', 'OUTDATED'].includes(verificationStatus)) {
+      if (!['VERIFIED', 'DRAFT', 'REVIEW', 'REJECTED', 'OUTDATED'].includes(verificationStatus)) {
         return res.status(400).json({ error: "Invalid verification status" });
       }
 
@@ -2623,20 +2663,23 @@ ${urls}
         .select({
           name: products.manufacturer,
           count: sql<number>`count(*)`,
+          avgScore: sql<number>`coalesce(round(avg(${products.validationScore}) filter (where ${products.validationScore} > 0)), 0)`,
+          sourcesCount: sql<number>`count(distinct ${products.sourceUrl}) filter (where coalesce(${products.sourceUrl}, '') <> '')`,
         })
         .from(products)
         .where(sql`${products.manufacturer} IS NOT NULL AND ${products.manufacturer} != ''`)
         .groupBy(products.manufacturer)
         .orderBy(desc(sql<number>`count(*)`));
 
+      // Only figures backed by the catalog; country is not stored, so it is not reported.
       const enriched = list.map((m, idx) => ({
         id: idx + 1,
         name: m.name,
         productCount: Number(m.count),
-        country: 'Internacional',
+        country: null,
         status: 'ACTIVE',
-        qualityScore: 91 + (idx % 8),
-        sourcesCount: 1 + (idx % 3),
+        qualityScore: Number(m.avgScore) || null,
+        sourcesCount: Number(m.sourcesCount),
       }));
 
       res.json(enriched);
@@ -2676,7 +2719,7 @@ ${urls}
     try {
       const { id, name, manufacturer, logo, website, description, status } = req.body;
       if (!name) return res.status(400).json({ error: "Nombre de marca requerido" });
-      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+      const slug = slugify(name);
 
       if (id) {
         await db.update(brands).set({ name, slug, manufacturer, logo, website, description, status }).where(eq(brands.id, Number(id)));
@@ -2720,10 +2763,11 @@ ${urls}
     try {
       const { id, name, parentId, description, image, status } = req.body;
       if (!name) return res.status(400).json({ error: "Nombre de categoría requerido" });
-      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+      const slug = slugify(name);
 
       if (id) {
-        await db.update(categories).set({ name, slug, parentId: parentId ? Number(parentId) : null, description, image, status }).where(eq(categories.id, Number(id)));
+        // Keep the existing slug on rename so public /categorias/<slug> links keep working.
+        await db.update(categories).set({ name, parentId: parentId ? Number(parentId) : null, description, image, ...(status ? { status } : {}) }).where(eq(categories.id, Number(id)));
       } else {
         await db.insert(categories).values({ name, slug, parentId: parentId ? Number(parentId) : null, description, image, status: status || 'ACTIVE' });
       }
@@ -2827,37 +2871,47 @@ ${urls}
       const failedJobs = await db
         .select()
         .from(scrapingJobs)
-        .where(eq(scrapingJobs.status, 'ERROR'))
-        .limit(10);
+        .where(inArray(scrapingJobs.status, ['ERROR', 'COMPLETED_WITH_WARNINGS']))
+        .orderBy(desc(scrapingJobs.createdAt))
+        .limit(50);
 
-      const groupedErrors = [
-        {
-          id: 'grp-1',
-          source: 'Alkofarma Oficial',
-          errorType: 'DOM_SELECTOR_EMPTY',
-          severity: 'WARNING',
-          occurrences: 3,
-          firstSeen: new Date(Date.now() - 1000 * 60 * 180),
-          lastSeen: new Date(Date.now() - 1000 * 60 * 15),
-          message: 'Atributo "features" no encontrado en 3 fichas técnicas con maquetación antigua.',
-          sampleUrl: 'https://alkofarma.com/antisepticos',
-        },
-        {
-          id: 'grp-2',
-          source: 'B.Braun Catálogo',
-          errorType: 'HTTP_TIMEOUT',
-          severity: 'MEDIUM',
-          occurrences: 1,
-          firstSeen: new Date(Date.now() - 1000 * 60 * 420),
-          lastSeen: new Date(Date.now() - 1000 * 60 * 120),
-          message: 'Servidor remoto excedió tiempo de espera (5000ms) durante sitemap crawler.',
-          sampleUrl: 'https://www.bbraun.com/sitemap.xml',
+      // Group the per-source failures recorded in each job's error log ("<url>: <STATUS> (<detail>)").
+      const clusterMap = new Map<string, any>();
+      for (const job of failedJobs) {
+        const lines = (job.errorLog || '').split('\n').filter(Boolean);
+        for (const line of lines) {
+          const match = line.match(/^(\S+):\s*([A-Z_]+)(?:\s*\((.*)\))?/);
+          const url = match?.[1] || '';
+          const errorType = match?.[2] || 'ERROR';
+          let source = url;
+          try { source = new URL(url).hostname; } catch { /* keep raw */ }
+          const key = `${source}|${errorType}`;
+          const seenAt = job.endedAt || job.createdAt || new Date();
+          const existing = clusterMap.get(key);
+          if (existing) {
+            existing.occurrences += 1;
+            if (seenAt < existing.firstSeen) existing.firstSeen = seenAt;
+            if (seenAt > existing.lastSeen) existing.lastSeen = seenAt;
+          } else {
+            clusterMap.set(key, {
+              id: key,
+              source: source || 'Fuente desconocida',
+              errorType,
+              severity: errorType === 'BLOCKED' || errorType === 'HTTP_ERROR' ? 'MEDIUM' : 'WARNING',
+              occurrences: 1,
+              firstSeen: seenAt,
+              lastSeen: seenAt,
+              message: match?.[3] || line,
+              sampleUrl: url,
+            });
+          }
         }
-      ];
+      }
+      const clusters = Array.from(clusterMap.values()).sort((a, b) => b.occurrences - a.occurrences);
 
       res.json({
-        totalErrors: failedJobs.length + 4,
-        clusters: groupedErrors,
+        totalErrors: clusters.reduce((acc, c) => acc + c.occurrences, 0),
+        clusters,
         failedJobs,
       });
     } catch (e) {
@@ -2891,15 +2945,19 @@ ${urls}
       const { scraper, qualityControl, autoPublishScore, riskThreshold, operatingMode } = req.body;
       
       const current = (await db.select().from(autonomousSettings).limit(1))[0];
+      const values = {
+        emergencyStop: !scraper,
+        autonomousModeEnabled: qualityControl,
+        autoPublishMinScore: autoPublishScore,
+        riskThreshold,
+        operatingMode,
+        updatedAt: new Date(),
+      };
+      // First save creates the settings row instead of silently doing nothing.
       if (current) {
-        await db.update(autonomousSettings).set({
-          emergencyStop: !scraper,
-          autonomousModeEnabled: qualityControl,
-          autoPublishMinScore: autoPublishScore,
-          riskThreshold,
-          operatingMode,
-          updatedAt: new Date(),
-        }).where(eq(autonomousSettings.id, current.id));
+        await db.update(autonomousSettings).set(values).where(eq(autonomousSettings.id, current.id));
+      } else {
+        await db.insert(autonomousSettings).values(values);
       }
 
       res.json({ success: true, message: "Ajustes de mantenimiento guardados." });
@@ -2973,7 +3031,7 @@ ${urls}
       // For this architecture, we insert them and use ON CONFLICT to avoid crashing.
       const mappedProducts = items.map((p: any) => {
         // Generate a simple slug from name if not present
-        const slug = p.slug || p.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+        const slug = p.slug || slugify(String(p.name));
         return {
           name: String(p.name).substring(0, 255),
           slug: slug.substring(0, 255),
@@ -3177,13 +3235,20 @@ ${urls}
       }
 
       const now = new Date();
+      const probe = await probeUrl(source.url);
       const [updated] = await db.update(sources).set({
         lastCheckedAt: now,
-        status: 'ACTIVE',
+        status: probe.ok ? 'ACTIVE' : 'ERROR',
         updatedAt: now
       }).where(eq(sources.id, id)).returning();
 
-      res.json({ success: true, message: `Fuente ${source.domain} comprobada exitosamente. Estado: ACTIVA.`, source: updated });
+      res.json({
+        success: probe.ok,
+        message: probe.ok
+          ? `Fuente ${source.domain} accesible (HTTP ${probe.status}). Estado: ACTIVA.`
+          : `Fuente ${source.domain} no accesible: ${probe.error}. Estado: ERROR.`,
+        source: updated,
+      });
     } catch (e) {
       console.error("Error checking source:", e);
       res.status(500).json({ error: "Failed to check source" });
@@ -3198,18 +3263,24 @@ ${urls}
         return res.status(404).json({ error: "Source not found" });
       }
 
+      // Extract from the URLs registered for this source, or its products/base URL.
+      const registered = await db.select().from(scraperUrls).where(eq(scraperUrls.sourceId, id));
+      const targets: ScrapeTarget[] = registered.length > 0
+        ? registered
+        : [{ url: source.productsUrl || source.url, sourceId: id }];
+      const outcome = await runScrapingJob(targets, id, null);
+
       const now = new Date();
-      const randomDetected = Math.floor(Math.random() * 120) + 10;
       const [updated] = await db.update(sources).set({
         lastExtractionAt: now,
-        detectedProductCount: (source.detectedProductCount || 0) + randomDetected,
-        status: 'ACTIVE',
+        detectedProductCount: outcome.productCount,
+        status: outcome.job.status === 'ERROR' ? 'ERROR' : 'ACTIVE',
         updatedAt: now
       }).where(eq(sources.id, id)).returning();
 
       res.json({ 
-        success: true, 
-        message: `Extracción completada para ${source.domain}. Se detectaron ${randomDetected} productos actualizados.`, 
+        success: outcome.job.status !== 'ERROR', 
+        message: `${source.domain}: ${outcome.message}`, 
         source: updated 
       });
     } catch (e) {
@@ -3302,15 +3373,17 @@ ${urls}
         return res.status(404).json({ error: "URL not found" });
       }
 
-      // Perform simulated deep validation
+      const probe = await probeUrl(targetUrl.url);
       const [updated] = await db.update(scraperUrls).set({
-        status: 'ACTIVE',
+        status: probe.ok ? 'ACTIVE' : 'ERROR',
         updatedAt: new Date()
       }).where(eq(scraperUrls.id, id)).returning();
 
       res.json({ 
-        success: true, 
-        message: `URL ${targetUrl.url} validada correctamente. Dominio accesible y respuesta HTTP 200 OK.`,
+        success: probe.ok, 
+        message: probe.ok
+          ? `URL ${targetUrl.url} accesible (HTTP ${probe.status}).`
+          : `URL ${targetUrl.url} no accesible: ${probe.error}.`,
         url: updated 
       });
     } catch (e) {
@@ -3329,134 +3402,116 @@ ${urls}
     }
   });
 
-  app.post("/api/admin/scraper/jobs", requireAuth, async (req: AuthRequest, res) => {
-    try {
-      const { sourceId, urlId } = req.body;
-      const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  type ScrapeTarget = { id?: number; url: string; sourceId?: number | null; manufacturer?: string | null; errorsCount?: number | null };
 
-      // Create scraping job
+  // Runs the real scraper over the given URLs, stores the job and the extracted drafts.
+  const runScrapingJob = async (targets: ScrapeTarget[], sourceId: number | null, urlId: number | null) => {
+      const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const startedAt = new Date();
       const [job] = await db.insert(scrapingJobs).values({
         jobId,
-        sourceId: sourceId ? Number(sourceId) : null,
-        urlId: urlId ? Number(urlId) : null,
-        status: 'COMPLETED',
-        progressPercent: 100,
-        totalFound: 12,
-        processedCount: 12,
-        validCount: 10,
-        duplicatesCount: 1,
-        errorsCount: 0,
-        incompleteCount: 1,
-        imagesFound: 36,
-        documentsFound: 8,
-        executionTimeMs: 3450,
-        startedAt: new Date(),
-        endedAt: new Date()
+        sourceId,
+        urlId,
+        status: 'RUNNING',
+        startedAt,
       }).returning();
 
-      // Generate realistic medical draft products with deep dossier fields
-      const sampleDrafts = [
-        {
-          name: 'Monitor Multiparamétrico de Signos Vitales Pro 12"',
-          brand: 'Mindray',
-          manufacturer: 'Mindray Medical',
-          model: 'uMEC 12',
-          reference: 'MR-UMEC12-MED',
-          description: 'Monitor multiparamétrico de altas prestaciones con pantalla táctil TFT de 12.1 pulgadas, ECG, SpO2, NIBP, Respiration, Temp. Diseñado para áreas de hospitalización y urgencias.',
-          specifications: [
-            { name: "Pantalla", value: "12.1 pulgadas táctil", unit: "pulgadas", source: "Datasheet Oficial" },
-            { name: "Derivaciones ECG", value: "3/5 derivaciones", unit: "derivaciones", source: "Manual de Usuario" },
-            { name: "Batería", value: "Hasta 8 horas", unit: "horas", source: "Ficha Técnica" },
-            { name: "Peso", value: "3.6 kg", unit: "kg", source: "Datasheet Oficial" }
-          ],
-          applications: 'Hospitalización, Urgencias, Triage',
-          presentation: 'Unidad con accesorios completos',
-          variants: [{ name: "uMEC 12 Standard", ref: "MR-UMEC12-S" }, { name: "uMEC 12 con EtCO2", ref: "MR-UMEC12-ET" }],
-          accessories: [{ name: "Cable ECG 5 derivaciones", type: "Incluido" }, { name: "Sensor SpO2 adulto reutilizable", type: "Incluido" }, { name: "Módulo EtCO2 sidestream", type: "Opcional" }],
-          configurations: [{ name: "Configuración Rodable", desc: "Incluye carro móvil con canasta" }, { name: "Configuración Mural", desc: "Incluye brazo de pared" }],
-          images: [
-            'https://images.unsplash.com/photo-1516549655169-df83a0774514?auto=format&fit=crop&q=80&w=800',
-            'https://images.unsplash.com/photo-1579684385127-1ef15d508118?auto=format&fit=crop&q=80&w=800'
-          ],
-          documents: [
-            { name: 'Ficha Técnica uMEC 12', url: 'https://example.com/docs/umec12.pdf', type: 'PDF' },
-            { name: 'Manual de Usuario uMEC 12', url: 'https://example.com/docs/umec12_manual.pdf', type: 'MANUAL' }
-          ],
-          conflicts: [],
-          missingFields: ['Consumo eléctrico exacto'],
-          sourcesList: ['https://www.mindray.com/products/umec12', 'https://example.com/docs/umec12.pdf'],
-          completenessBreakdown: { identity: 100, description: 100, specifications: 90, images: 100, documentation: 95 },
-          auditReport: { individualPage: true, categoryContext: true, pdfDatasheet: true, manual: true, galleryImages: true, variants: true, accessories: true },
-          completenessScore: 94,
-          duplicateStatus: 'UNIQUE'
-        },
-        {
-          name: 'Ventilador Mecánico de Cuidado Intensivo ICU-700',
-          brand: 'Mindray',
-          manufacturer: 'Mindray Medical',
-          model: 'SV300',
-          reference: 'SV-300-ICU',
-          description: 'Ventilador pulmonar avanzado para pacientes adultos, pediátricos y neonatales con modos invasivos y no invasivos, turbina integrada y pantalla de alta resolución.',
-          specifications: [
-            { name: "Modos Ventilación", value: "VC-A/C, PC-A/C, SIMV, CPAP/PSV", unit: "modos", source: "Datasheet" },
-            { name: "Flujo Inspiratorio", value: "Hasta 240 L/min", unit: "L/min", source: "Datasheet" },
-            { name: "Pantalla", value: "15.1 pulgadas táctil", unit: "pulgadas", source: "Especificaciones Oficiales" }
-          ],
-          applications: 'UCI Adulto y Pediátrica',
-          presentation: 'Sistema completo con carro y brazo articulado',
-          variants: [{ name: "SV300 Standard", ref: "SV300-STD" }, { name: "SV300 con Cpap Neo", ref: "SV300-NEO" }],
-          accessories: [{ name: "Circuito paciente reutilizable", type: "Incluido" }, { name: "Humidificador térmico", type: "Incluido" }],
-          configurations: [{ name: "Carro rodable con compresor", desc: "Independiente de red de aire" }],
-          images: ['https://images.unsplash.com/photo-1584515979956-d9f6e5d09982?auto=format&fit=crop&q=80&w=800'],
-          documents: [{ name: 'Manual Clínico SV300', url: 'https://example.com/docs/sv300.pdf', type: 'PDF' }],
-          conflicts: [],
-          missingFields: ['Certificación FDA específica'],
-          sourcesList: ['https://www.mindray.com/ventilator/sv300'],
-          completenessBreakdown: { identity: 100, description: 90, specifications: 85, images: 90, documentation: 80 },
-          auditReport: { individualPage: true, categoryContext: true, pdfDatasheet: true, manual: false, galleryImages: true, variants: true, accessories: true },
-          completenessScore: 89,
-          duplicateStatus: 'UNIQUE'
-        }
-      ];
+      const { scraperService } = await import("./src/services/scraperService.ts");
+      let result;
+      try {
+        result = await scraperService.startScraping(targets.map(t => t.url));
+      } catch (scrapeErr: any) {
+        await db.update(scrapingJobs).set({
+          status: 'ERROR',
+          errorLog: scrapeErr.message,
+          endedAt: new Date(),
+          executionTimeMs: Date.now() - startedAt.getTime(),
+        }).where(eq(scrapingJobs.id, job.id));
+        throw new Error(`La extracción falló: ${scrapeErr.message}`);
+      }
 
-      for (const draft of sampleDrafts) {
-        const normalizedResult = normalizationService.normalize(draft);
+      for (const product of result.products) {
+        const missingFields = [
+          !product.model && 'Modelo',
+          !product.description && 'Descripción',
+          !product.imageUrl && 'Imagen',
+          !product.datasheetUrl && 'Ficha técnica',
+        ].filter(Boolean);
+        const target = targets.find(t => product.sourceUrl.startsWith(t.url));
         await db.insert(draftProducts).values({
           jobId,
-          sourceId: sourceId ? Number(sourceId) : null,
-          sourceUrl: 'https://www.mindray.com/products',
-          productUrl: `https://www.mindray.com/products/${draft.model.toLowerCase()}`,
-          name: draft.name, // Official commercial name never modified artificially
-          brand: normalizedResult.normalized.brand,
-          manufacturer: normalizedResult.normalized.manufacturer,
-          model: draft.model,
-          reference: draft.reference,
-          description: draft.description,
-          specifications: normalizedResult.normalized.specifications,
-          applications: normalizedResult.normalized.applications.join(', '),
-          presentation: normalizedResult.normalized.presentation,
-          variants: draft.variants,
-          accessories: draft.accessories,
-          configurations: draft.configurations,
-          images: draft.images,
-          documents: draft.documents,
-          conflicts: draft.conflicts,
-          missingFields: draft.missingFields,
-          sourcesList: draft.sourcesList,
-          completenessBreakdown: draft.completenessBreakdown,
-          auditReport: draft.auditReport,
-          completenessScore: draft.completenessScore,
-          status: 'DRAFT',
-          duplicateStatus: draft.duplicateStatus as any,
-          originalData: normalizedResult.original,
-          normalizedData: normalizedResult.normalized
+          sourceId: target?.sourceId ?? sourceId,
+          sourceUrl: target?.url || product.sourceUrl,
+          productUrl: product.sourceUrl,
+          name: product.name.substring(0, 500),
+          brand: product.brand,
+          manufacturer: target?.manufacturer || product.brand,
+          model: product.model,
+          description: product.description,
+          specifications: product.features.map(f => ({ name: 'Característica', value: f, source: product.sourceUrl })),
+          applications: product.application.join(', '),
+          presentation: product.presentation,
+          images: product.imageUrl ? [product.imageUrl] : [],
+          documents: product.datasheetUrl ? [{ name: 'Ficha técnica', url: product.datasheetUrl, type: 'PDF' }] : [],
+          missingFields,
+          sourcesList: [product.sourceUrl],
+          completenessScore: Math.round(((4 - missingFields.length) / 4) * 100),
+          status: missingFields.length > 2 ? 'INCOMPLETE' : 'DRAFT',
+          originalData: product as any,
         });
       }
 
-      res.status(201).json({ success: true, job, message: "Extracción completada con éxito. 3 productos DRAFT nuevos añadidos para revisión." });
-    } catch (e) {
+      const failedSources = result.sourceStatuses.filter(st => st.status !== 'COMPLETED');
+      for (const t of targets) {
+        if (!t.id) continue;
+        const st = result.sourceStatuses.find(x => x.url === t.url);
+        await db.update(scraperUrls).set({
+          lastExtractionAt: new Date(),
+          detectedProducts: result.products.filter(p => p.sourceUrl.startsWith(t.url)).length,
+          errorsCount: st && st.status !== 'COMPLETED' ? (t.errorsCount || 0) + 1 : t.errorsCount,
+          updatedAt: new Date(),
+        }).where(eq(scraperUrls.id, t.id));
+      }
+
+      const [finishedJob] = await db.update(scrapingJobs).set({
+        status: failedSources.length === 0 ? 'COMPLETED' : (result.products.length > 0 ? 'COMPLETED_WITH_WARNINGS' : 'ERROR'),
+        progressPercent: 100,
+        totalFound: result.stats.found,
+        processedCount: result.products.length,
+        validCount: result.products.length - result.stats.incomplete,
+        duplicatesCount: result.stats.duplicates,
+        errorsCount: failedSources.length,
+        incompleteCount: result.stats.incomplete,
+        imagesFound: result.products.filter(p => p.imageUrl).length,
+        documentsFound: result.products.filter(p => p.datasheetUrl).length,
+        executionTimeMs: Date.now() - startedAt.getTime(),
+        endedAt: new Date(),
+        errorLog: failedSources.length ? failedSources.map(st => `${st.url}: ${st.status}${st.error ? ` (${st.error})` : ''}`).join('\n') : null,
+      }).where(eq(scrapingJobs.id, job.id)).returning();
+
+      const warning = failedSources.length ? ` ${failedSources.length} fuente(s) no se pudieron procesar.` : '';
+      return {
+        job: finishedJob,
+        productCount: result.products.length,
+        message: `Extracción finalizada: ${result.products.length} producto(s) en borrador para revisión.${warning}`,
+      };
+  };
+
+  app.post("/api/admin/scraper/jobs", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const { sourceId, urlId } = req.body;
+      // Real extraction over the registered URLs (one URL, or every ACTIVE one).
+      const targets = urlId
+        ? await db.select().from(scraperUrls).where(eq(scraperUrls.id, Number(urlId)))
+        : await db.select().from(scraperUrls).where(eq(scraperUrls.status, 'ACTIVE'));
+      if (targets.length === 0) {
+        return res.status(400).json({ error: "No hay URLs activas registradas. Agregue y valide al menos una URL de fabricante antes de extraer." });
+      }
+      const outcome = await runScrapingJob(targets, sourceId ? Number(sourceId) : null, urlId ? Number(urlId) : null);
+      res.status(201).json({ success: true, job: outcome.job, message: outcome.message });
+    } catch (e: any) {
       console.error("Error running scraping job:", e);
-      res.status(500).json({ error: "Failed to execute scraping job" });
+      res.status(500).json({ error: e.message || "No se pudo ejecutar la extracción." });
     }
   });
 
@@ -3565,7 +3620,7 @@ ${urls}
       // Check if brand exists or create
       let brandId = null;
       if (draft.brand) {
-        const slug = draft.brand.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+        const slug = slugify(draft.brand);
         const [existingBrand] = await db.select().from(brands).where(eq(brands.slug, slug));
         if (existingBrand) {
           brandId = existingBrand.id;
@@ -3581,17 +3636,19 @@ ${urls}
       }
 
       // Insert into official products table
-      const slug = `${(draft.name || 'product').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Math.floor(Math.random() * 9000) + 1000}`;
+      const slug = `${slugify(draft.name || 'producto')}-${draft.id}`;
       const [newProduct] = await db.insert(products).values({
         name: draft.name,
         brandId,
         manufacturer: draft.manufacturer || draft.brand || '',
-        model: draft.model || 'Standard',
-        catalogNumber: draft.reference || `REF-${Math.floor(Math.random() * 90000) + 10000}`,
+        // Never invent a model or reference code: leave them empty for review.
+        model: draft.model || null,
+        catalogNumber: draft.reference || null,
         description: draft.description || '',
         application: draft.applications || '',
         presentation: draft.presentation || '',
         verificationStatus: 'VERIFIED',
+        publicationStatus: 'PUBLISHED',
         status: 'ACTIVE',
         slug,
         sourceUrl: draft.productUrl || ''
@@ -3982,8 +4039,10 @@ ${urls}
 
       res.json({
         databaseStatus: "CONNECTED",
-        poolConnections: 12,
-        maxPool: 100,
+        databaseEngine: global._dbEngineType || 'pglite',
+        // Real pool usage when running on PostgreSQL; embedded PGlite has no pool.
+        poolConnections: global._dbEngineType === 'postgres' && global._postgresPool ? global._postgresPool.totalCount : null,
+        maxPool: global._dbEngineType === 'postgres' && global._postgresPool ? global._postgresPool.options.max ?? null : null,
         metrics: {
           totalProducts: totalProds[0]?.count || 0,
           draft: draftProds[0]?.count || 0,

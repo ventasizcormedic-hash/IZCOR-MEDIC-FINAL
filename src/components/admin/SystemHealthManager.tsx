@@ -115,7 +115,11 @@ export function SystemHealthManager({ user }: SystemHealthManagerProps) {
         </div>
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-1">
           <span className="text-[10px] font-bold uppercase text-cyan-700">Conexiones DB Pool</span>
-          <p className="text-2xl font-black text-cyan-700">{healthData?.poolConnections || 12} / {healthData?.maxPool || 100}</p>
+          <p className="text-2xl font-black text-cyan-700">
+            {healthData?.poolConnections != null
+              ? `${healthData.poolConnections} / ${healthData.maxPool ?? '—'}`
+              : healthData?.databaseEngine === 'pglite' ? 'PGlite (sin pool)' : '—'}
+          </p>
           <span className="text-[10px] text-emerald-600 font-bold">Saludable ({healthData?.databaseStatus || 'CONNECTED'})</span>
         </div>
       </div>
