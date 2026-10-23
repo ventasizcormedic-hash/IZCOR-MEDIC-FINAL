@@ -5,7 +5,7 @@ test.describe('sitio público y navegación', () => {
     watchPage(page);
     await page.goto('/');
     await expect(page.locator('#homepage-main')).toBeVisible();
-    await expect(page.locator('h1')).toContainText('Tecnología médica');
+    await expect(page.locator('h1')).toContainText('Soluciones médicas');
     await expect(page.locator('meta[name="description"]')).toHaveCount(1);
     await expect(page.locator('meta[name="description"]')).toHaveAttribute('content', /IZCOR|médic/i);
     await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', /\/$/);
@@ -22,7 +22,7 @@ test.describe('sitio público y navegación', () => {
     await expect(page.locator('h1')).toHaveText('Contáctanos');
     await expect(page.locator('footer')).toBeVisible();
     await page.goto('/ruta-inexistente-e2e');
-    await expect(page.locator('h2')).toContainText('No encontramos productos');
+    await expect(page.locator('h1')).toContainText('Página no encontrada');
     await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content', /noindex/);
   });
 

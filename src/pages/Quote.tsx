@@ -50,7 +50,7 @@ export function Quote() {
                 imageUrl: data.imageUrl || (data.images && data.images[0]?.url) || null,
                 slug: data.slug || '',
                 categoryName: data.category?.name || data.categoryName || '',
-              });
+              }, { ifMissing: true });
             }
           })
           .catch(err => console.error('Error fetching product for quote:', err))

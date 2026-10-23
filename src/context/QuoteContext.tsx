@@ -24,7 +24,7 @@ interface QuoteContextType {
     imageUrl?: string | null;
     slug?: string;
     categoryName?: string | null;
-  }) => void;
+  }, options?: { ifMissing?: boolean }) => void;
   removeItem: (id: number) => void;
   updateQuantity: (id: number, delta: number) => void;
   clearTray: () => void;
@@ -74,13 +74,15 @@ export function QuoteProvider({ children }: { children: ReactNode }) {
     imageUrl?: string | null;
     slug?: string;
     categoryName?: string | null;
-  }) => {
+  }, options?: { ifMissing?: boolean }) => {
     setJustAddedId(product.id);
     if (justAddedTimer.current) clearTimeout(justAddedTimer.current);
     justAddedTimer.current = setTimeout(() => setJustAddedId(null), 2000);
 
     setItems((prev) => {
       const existing = prev.find((item) => item.id === product.id);
+      // ifMissing: links like /cotizar?product=ID must not add a second unit.
+      if (existing && options?.ifMissing) return prev;
       if (existing) {
         return prev.map((item) =>
           item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item

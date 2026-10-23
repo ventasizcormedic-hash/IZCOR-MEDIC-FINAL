@@ -2153,7 +2153,8 @@ ${urls}
         withSpecs: sql<number>`count(*) filter (where coalesce(trim(${products.technicalSpecs}), '') <> '')`,
         withModel: sql<number>`count(*) filter (where coalesce(trim(${products.model}), '') <> '' and coalesce(trim(${products.catalogNumber}), '') <> '')`,
         withSource: sql<number>`count(*) filter (where coalesce(trim(${products.sourceUrl}), '') <> '')`,
-        withImage: sql<number>`count(*) filter (where exists (select 1 from ${productImages} where ${productImages.productId} = ${products.id}))`,
+        // Explicit aliases: drizzle leaves columns unqualified inside select fields.
+        withImage: sql<number>`count(*) filter (where exists (select 1 from product_images pi where pi.product_id = products.id))`,
         incomplete: sql<number>`count(*) filter (where coalesce(trim(${products.model}), '') = '' or coalesce(trim(${products.technicalSpecs}), '') = '')`,
       }).from(products)) as any[];
       const pct = (n: number) => (totalProducts > 0 ? Math.round((Number(n) / totalProducts) * 100) : 0);
@@ -2849,8 +2850,8 @@ ${urls}
         db.select({ count: sql<number>`count(*)` }).from(products),
         // Products that have no image / no document at all (not totals minus totals).
         db.select({
-          withoutImage: sql<number>`count(*) filter (where not exists (select 1 from ${productImages} where ${productImages.productId} = ${products.id}))`,
-          withoutDoc: sql<number>`count(*) filter (where not exists (select 1 from ${productDocuments} where ${productDocuments.productId} = ${products.id}))`,
+          withoutImage: sql<number>`count(*) filter (where not exists (select 1 from product_images pi where pi.product_id = products.id))`,
+          withoutDoc: sql<number>`count(*) filter (where not exists (select 1 from product_documents pd where pd.product_id = products.id))`,
         }).from(products),
       ]);
 
