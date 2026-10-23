@@ -16,7 +16,8 @@
     "test:e2e:playwright": "playwright test",
     "test:e2e:playwright:update": "playwright test --update-snapshots",
     "audit:catalog": "tsx scripts/audit_catalog.ts",
-    "import-catalog": "tsx scripts/import_catalog_json.ts"
+    "import-catalog": "tsx scripts/import_catalog_json.ts",
+    "set-role": "tsx scripts/set_user_role.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

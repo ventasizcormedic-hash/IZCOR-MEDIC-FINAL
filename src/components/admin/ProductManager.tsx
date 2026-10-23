@@ -6,6 +6,8 @@ import {
   SlidersHorizontal, ArrowUpDown, ChevronDown
 } from 'lucide-react';
 import { OptimizedImage } from '../common/OptimizedImage';
+import { useAdminFeedback } from './ui/AdminFeedback';
+import { useModalBehavior } from '../../hooks/useModalBehavior';
 
 interface ProductItem {
   id: number;
@@ -32,19 +34,35 @@ interface ProductItem {
   updatedAt: string;
 }
 
+export interface ProductListFilters {
+  manufacturer?: string;
+  categoryId?: string;
+  issue?: string;
+}
+
 interface ProductManagerProps {
   user: any;
   initialFilter?: string;
+  /** Extra filters coming from other screens (manufacturer, category, data issue). */
+  initialFilters?: ProductListFilters;
   onNavigateToTab?: (tab: string) => void;
 }
 
 export const ProductManager: React.FC<ProductManagerProps> = ({
   user,
   initialFilter = 'ALL',
+  initialFilters = {},
   onNavigateToTab,
 }) => {
+  const { toast, confirm } = useAdminFeedback();
   const [activeStatusTab, setActiveStatusTab] = useState<string>(initialFilter);
   const [searchTerm, setSearchTerm] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
+  const [loadError, setLoadError] = useState(false);
+  const [filterManufacturer, setFilterManufacturer] = useState(initialFilters.manufacturer || '');
+  const [filterCategoryId, setFilterCategoryId] = useState(initialFilters.categoryId || '');
+  const [brandOptions, setBrandOptions] = useState<Array<{ id: number; name: string }>>([]);
+  const [categoryOptions, setCategoryOptions] = useState<Array<{ id: number; name: string; parentId?: number | null }>>([]);
   const [products, setProducts] = useState<ProductItem[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
@@ -54,7 +72,7 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
   // Advanced Filters
   const [filterCategory, setFilterCategory] = useState<string>('ALL');
   const [filterBrand, setFilterBrand] = useState<string>('ALL');
-  const [filterIssue, setFilterIssue] = useState<string>('ALL');
+  const [filterIssue, setFilterIssue] = useState<string>(initialFilters.issue || 'ALL');
   const [showFilterDrawer, setShowFilterDrawer] = useState(false);
 
   // Selection for bulk actions
@@ -81,20 +99,27 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
       if (activeStatusTab !== 'ALL') {
         queryUrl += `&status=${activeStatusTab}`;
       }
-      if (searchTerm.trim()) {
-        queryUrl += `&search=${encodeURIComponent(searchTerm.trim())}`;
+      if (appliedSearch) {
+        queryUrl += `&search=${encodeURIComponent(appliedSearch)}`;
       }
+      if (filterIssue !== 'ALL') queryUrl += `&issue=${filterIssue}`;
+      if (filterManufacturer) queryUrl += `&manufacturer=${encodeURIComponent(filterManufacturer)}`;
+      if (filterCategoryId) queryUrl += `&categoryId=${encodeURIComponent(filterCategoryId)}`;
 
+      setLoadError(false);
       const res = await fetch(queryUrl, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      const data = await res.json();
-      if (res.ok) {
-        setProducts(data.products || []);
-        setTotalCount(data.total || 0);
-      }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Error ${res.status}`);
+      setProducts(data.products || []);
+      setTotalCount(data.total || 0);
+      // Keep only selections that are still visible.
+      setSelectedIds(prev => prev.filter(id => (data.products || []).some((p: ProductItem) => p.id === id)));
     } catch (err) {
       console.error("Error fetching products:", err);
+      setLoadError(true);
+      setProducts([]);
     } finally {
       setIsLoading(false);
     }
@@ -102,14 +127,36 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
 
   useEffect(() => {
     fetchProducts();
-  }, [user, activeStatusTab, page, pageSize]);
+  }, [user, activeStatusTab, page, pageSize, appliedSearch, filterIssue, filterManufacturer, filterCategoryId]);
 
-  // Handle Search submit
+  // Brand and category options for the inspector selects
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      try {
+        const token = await user.getIdToken();
+        const headers = { 'Authorization': `Bearer ${token}` };
+        const [brandsRes, catsRes] = await Promise.all([
+          fetch('/api/admin/brands/full', { headers }),
+          fetch('/api/admin/categories/tree', { headers }),
+        ]);
+        if (brandsRes.ok) setBrandOptions(await brandsRes.json());
+        if (catsRes.ok) setCategoryOptions(await catsRes.json());
+      } catch (err) {
+        console.error('Error loading brand/category options:', err);
+      }
+    })();
+  }, [user]);
+
+  // Handle Search submit (search and page change together, one fetch)
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     setPage(1);
-    fetchProducts();
+    setAppliedSearch(searchTerm.trim());
   };
+
+  const inspectorRef = React.useRef<HTMLDivElement>(null);
+  useModalBehavior(Boolean(selectedProduct), () => setSelectedProduct(null), inspectorRef);
 
   // Inspect Product
   const handleInspect = async (id: number) => {
@@ -127,11 +174,11 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
         setSelectedProduct(data);
         setEditForm({ ...data });
       } else {
-        alert(data.error || 'Error al cargar detalles del producto');
+        toast.error(data.error || 'Error al cargar detalles del producto');
       }
     } catch (err) {
       console.error(err);
-      alert('Error de conexión al obtener producto');
+      toast.error('Error de conexión al obtener producto');
     } finally {
       setIsDetailLoading(false);
     }
@@ -155,23 +202,43 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
       const data = await res.json();
       if (res.ok && data.success) {
         setSaveSuccessMsg("Cambios guardados exitosamente.");
+        toast.success('Cambios guardados.');
         fetchProducts();
         // Update local
-        setSelectedProduct({ ...selectedProduct, ...editForm });
+        setSelectedProduct({
+          ...selectedProduct,
+          ...editForm,
+          brandName: brandOptions.find(b => b.id === Number(editForm.brandId))?.name ?? selectedProduct.brandName,
+          categoryName: categoryOptions.find(c => c.id === Number(editForm.categoryId))?.name ?? selectedProduct.categoryName,
+        });
       } else {
-        alert(data.error || 'Error al guardar cambios');
+        toast.error(data.error || 'Error al guardar cambios');
       }
     } catch (err) {
       console.error(err);
-      alert('Error de conexión al guardar producto');
+      toast.error('Error de conexión al guardar producto');
     } finally {
       setIsSaving(false);
     }
   };
 
   // Single Quick Verification Change
+  const [quickStatusId, setQuickStatusId] = useState<number | null>(null);
   const handleQuickStatus = async (id: number, status: string) => {
     if (!user) return;
+    const product = products.find(p => p.id === id);
+    const ok = await confirm(status === 'VERIFIED' ? {
+      title: '¿Verificar este producto?',
+      message: `"${product?.name || `#${id}`}" quedará marcado como VERIFICADO.`,
+      confirmLabel: 'Verificar',
+      tone: 'primary',
+    } : {
+      title: '¿Mover este producto a borrador?',
+      message: `"${product?.name || `#${id}`}" dejará de figurar como verificado.`,
+      confirmLabel: 'Mover a borrador',
+    });
+    if (!ok) return;
+    setQuickStatusId(id);
     try {
       const token = await user.getIdToken();
       const res = await fetch(`/api/admin/catalog/products/${id}/verification`, {
@@ -183,17 +250,32 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
         body: JSON.stringify({ verificationStatus: status })
       });
       if (res.ok) {
+        toast.success(status === 'VERIFIED' ? 'Producto verificado.' : 'Producto movido a borrador.');
         fetchProducts();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || 'No se pudo actualizar el estado.');
       }
     } catch (err) {
       console.error(err);
+      toast.error('Error de conexión al actualizar el estado.');
+    } finally {
+      setQuickStatusId(null);
     }
   };
 
   // Bulk Actions
   const handleBulkAction = async (action: string) => {
     if (!user || selectedIds.length === 0) return;
-    if (action === 'DELETE' && !window.confirm(`¿Estás seguro de eliminar permanentemente ${selectedIds.length} productos?`)) {
+    const n = selectedIds.length;
+    const BULK_CONFIRM: Record<string, { title: string; message: string; confirmLabel: string; tone?: 'danger' | 'primary' }> = {
+      PUBLISH: { title: `¿Publicar ${n} producto(s)?`, message: 'Serán visibles en el catálogo público.', confirmLabel: 'Publicar', tone: 'primary' },
+      UNPUBLISH: { title: `¿Despublicar ${n} producto(s)?`, message: 'Dejarán de verse en el catálogo público.', confirmLabel: 'Despublicar' },
+      SET_VERIFIED: { title: `¿Marcar ${n} producto(s) como verificados?`, message: 'Se registrará su verificación a su nombre.', confirmLabel: 'Marcar verificados', tone: 'primary' },
+      SET_DRAFT: { title: `¿Mover ${n} producto(s) a borrador?`, message: 'Dejarán de figurar como verificados.', confirmLabel: 'Mover a borrador' },
+      DELETE: { title: `¿Eliminar permanentemente ${n} producto(s)?`, message: 'Esta acción no se puede deshacer.', confirmLabel: 'Eliminar' },
+    };
+    if (BULK_CONFIRM[action] && !(await confirm(BULK_CONFIRM[action]))) {
       return;
     }
 
@@ -215,25 +297,27 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
       const data = await res.json();
       if (res.ok && data.success) {
         setBulkMessage(data.message);
+        toast.success(data.message || 'Acción masiva aplicada.');
         setSelectedIds([]);
         fetchProducts();
       } else {
-        alert(data.error || 'Error en acción masiva');
+        toast.error(data.error || 'Error en acción masiva');
       }
     } catch (err) {
       console.error(err);
-      alert('Error de conexión');
+      toast.error('Error de conexión');
     } finally {
       setIsPerformingBulk(false);
     }
   };
 
   // Toggle selection
+  // Selection only ever covers the rows currently shown in the table.
   const toggleSelectAll = () => {
-    if (selectedIds.length === products.length) {
+    if (filteredProducts.length > 0 && filteredProducts.every(p => selectedIds.includes(p.id))) {
       setSelectedIds([]);
     } else {
-      setSelectedIds(products.map(p => p.id));
+      setSelectedIds(filteredProducts.map(p => p.id));
     }
   };
 
@@ -254,15 +338,8 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
     { key: 'OUTDATED', label: 'Desactualizados' },
   ];
 
-  // Client side filtered view if advanced filters active
-  const filteredProducts = useMemo(() => {
-    return products.filter(p => {
-      if (filterIssue === 'NO_IMAGE' && p.imageUrl) return false;
-      if (filterIssue === 'NO_MODEL' && p.model) return false;
-      if (filterIssue === 'NO_SPECS' && p.technicalSpecs) return false;
-      return true;
-    });
-  }, [products, filterIssue]);
+  // Issue filters are applied by the server, so the page already holds exactly the visible rows.
+  const filteredProducts = products;
 
   return (
     <div className="space-y-6 animate-fadeIn">
@@ -277,9 +354,11 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
 
         <div className="flex items-center gap-2">
           <button
+            type="button"
             onClick={() => fetchProducts()}
             className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50 text-gray-600 transition"
             title="Recargar listado"
+            aria-label="Recargar listado"
           >
             <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
           </button>
@@ -312,7 +391,8 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
           <form onSubmit={handleSearch} className="flex-1 relative">
             <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
             <input
-              type="text"
+              type="search"
+              aria-label="Buscar productos"
               placeholder="Buscar por nombre, modelo, código o fabricante..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -322,8 +402,9 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
 
           <div className="flex items-center gap-2">
             <select
+              aria-label="Filtrar por incidencia"
               value={filterIssue}
-              onChange={(e) => setFilterIssue(e.target.value)}
+              onChange={(e) => { setFilterIssue(e.target.value); setPage(1); }}
               className="px-3 py-2 text-xs border border-gray-200 rounded-lg bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="ALL">Todas las Incidencias</option>
@@ -333,6 +414,7 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
             </select>
 
             <button
+              type="button"
               onClick={handleSearch}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold shadow-sm transition"
             >
@@ -341,11 +423,28 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
           </div>
         </div>
 
+        {/* Filtros recibidos desde otras pantallas */}
+        {(filterManufacturer || filterCategoryId) && (
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-gray-500 font-semibold">Filtros activos:</span>
+            {filterManufacturer && (
+              <button type="button" onClick={() => { setFilterManufacturer(''); setPage(1); }} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-blue-50 border border-blue-200 text-blue-800 font-semibold">
+                Fabricante: {filterManufacturer} <X className="w-3 h-3" aria-label="Quitar filtro" />
+              </button>
+            )}
+            {filterCategoryId && (
+              <button type="button" onClick={() => { setFilterCategoryId(''); setPage(1); }} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-blue-50 border border-blue-200 text-blue-800 font-semibold">
+                Categoría: {categoryOptions.find(c => String(c.id) === filterCategoryId)?.name || `#${filterCategoryId}`} <X className="w-3 h-3" aria-label="Quitar filtro" />
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Notificación de acción masiva */}
         {bulkMessage && (
           <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-800 flex items-center justify-between">
             <span>{bulkMessage}</span>
-            <button onClick={() => setBulkMessage(null)}><X className="w-4 h-4" /></button>
+            <button type="button" onClick={() => setBulkMessage(null)} aria-label="Cerrar mensaje"><X className="w-4 h-4" /></button>
           </div>
         )}
 
@@ -407,7 +506,8 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
                 <th className="p-3 w-8 text-center">
                   <input
                     type="checkbox"
-                    checked={selectedIds.length > 0 && selectedIds.length === products.length}
+                    aria-label="Seleccionar todos los productos visibles"
+                    checked={filteredProducts.length > 0 && filteredProducts.every(p => selectedIds.includes(p.id))}
                     onChange={toggleSelectAll}
                     className="rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
                   />
@@ -430,6 +530,13 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
                     Cargando catálogo oficial...
                   </td>
                 </tr>
+              ) : loadError ? (
+                <tr>
+                  <td colSpan={9} className="p-10 text-center text-rose-600">
+                    No se pudo cargar el listado.{' '}
+                    <button type="button" onClick={() => fetchProducts()} className="font-bold underline">Reintentar</button>
+                  </td>
+                </tr>
               ) : filteredProducts.length === 0 ? (
                 <tr>
                   <td colSpan={9} className="p-10 text-center text-gray-400">
@@ -447,6 +554,7 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
                       <td className="p-3 text-center">
                         <input
                           type="checkbox"
+                          aria-label={`Seleccionar ${p.name}`}
                           checked={isSelected}
                           onChange={() => toggleSelectOne(p.id)}
                           className="rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
@@ -484,17 +592,21 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
                       </td>
 
                       <td className="p-3">
-                        <div className="flex items-center gap-1.5">
-                          <div className="w-10 bg-gray-100 rounded-full h-1.5 overflow-hidden">
-                            <div 
-                              className={`h-1.5 rounded-full ${
-                                (p.validationScore || 88) >= 85 ? 'bg-emerald-500' : 'bg-amber-500'
-                              }`} 
-                              style={{ width: `${p.validationScore || 88}%` }}
-                            />
+                        {typeof p.validationScore === 'number' && p.validationScore > 0 ? (
+                          <div className="flex items-center gap-1.5">
+                            <div className="w-10 bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                              <div 
+                                className={`h-1.5 rounded-full ${
+                                  p.validationScore >= 85 ? 'bg-emerald-500' : 'bg-amber-500'
+                                }`} 
+                                style={{ width: `${p.validationScore}%` }}
+                              />
+                            </div>
+                            <span className="font-bold text-gray-800 text-[11px]">{p.validationScore}%</span>
                           </div>
-                          <span className="font-bold text-gray-800 text-[11px]">{p.validationScore || 88}%</span>
-                        </div>
+                        ) : (
+                          <span className="text-[11px] text-gray-400" title="Aún no se ejecutó la validación de calidad">Sin evaluar</span>
+                        )}
                       </td>
 
                       <td className="p-3">
@@ -524,26 +636,35 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
                       <td className="p-3 text-right">
                         <div className="flex items-center justify-end gap-1">
                           <button
+                            type="button"
                             onClick={() => handleInspect(p.id)}
-                            className="p-1.5 rounded-md hover:bg-blue-50 text-blue-600 transition"
+                            disabled={isDetailLoading}
+                            className="p-2 rounded-md hover:bg-blue-50 text-blue-600 transition disabled:opacity-50"
                             title="Inspeccionar y editar"
+                            aria-label={`Inspeccionar y editar ${p.name}`}
                           >
                             <Edit className="w-3.5 h-3.5" />
                           </button>
 
                           {p.verificationStatus !== 'VERIFIED' ? (
                             <button
+                              type="button"
                               onClick={() => handleQuickStatus(p.id, 'VERIFIED')}
-                              className="p-1.5 rounded-md hover:bg-emerald-50 text-emerald-600 transition"
+                              disabled={quickStatusId === p.id}
+                              className="p-2 rounded-md hover:bg-emerald-50 text-emerald-600 transition disabled:opacity-50"
                               title="Aprobar inmediatamente"
+                              aria-label={`Verificar ${p.name}`}
                             >
                               <CheckCircle2 className="w-3.5 h-3.5" />
                             </button>
                           ) : (
                             <button
+                              type="button"
                               onClick={() => handleQuickStatus(p.id, 'DRAFT')}
-                              className="p-1.5 rounded-md hover:bg-amber-50 text-amber-600 transition"
+                              disabled={quickStatusId === p.id}
+                              className="p-2 rounded-md hover:bg-amber-50 text-amber-600 transition disabled:opacity-50"
                               title="Bajar a borrador"
+                              aria-label={`Mover ${p.name} a borrador`}
                             >
                               <FileText className="w-3.5 h-3.5" />
                             </button>
@@ -566,6 +687,8 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
 
           <div className="flex items-center gap-2">
             <button
+              type="button"
+              aria-label="Página anterior"
               disabled={page <= 1}
               onClick={() => setPage(p => Math.max(1, p - 1))}
               className="p-1.5 rounded-md border border-gray-200 disabled:opacity-40 hover:bg-gray-50"
@@ -574,6 +697,8 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
             </button>
             <span className="font-bold text-gray-700">Página {page}</span>
             <button
+              type="button"
+              aria-label="Página siguiente"
               disabled={page * pageSize >= totalCount}
               onClick={() => setPage(p => p + 1)}
               className="p-1.5 rounded-md border border-gray-200 disabled:opacity-40 hover:bg-gray-50"
@@ -584,21 +709,31 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
         </div>
       </div>
 
+      {isDetailLoading && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" role="status" aria-live="polite">
+          <div className="bg-white rounded-xl px-5 py-4 shadow-xl flex items-center gap-3 text-sm font-semibold text-gray-700">
+            <RefreshCw className="w-4 h-4 animate-spin text-blue-600" /> Cargando ficha del producto...
+          </div>
+        </div>
+      )}
+
       {/* Modal / Inspector Profundo del Producto */}
       {selectedProduct && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/60 backdrop-blur-sm animate-fadeIn" onClick={() => setSelectedProduct(null)}>
+          <div ref={inspectorRef} role="dialog" aria-modal="true" aria-labelledby="product-inspector-title" onClick={(e) => e.stopPropagation()} className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[95vh] sm:max-h-[90vh] flex flex-col overflow-hidden">
             {/* Modal Header */}
             <div className="p-5 bg-slate-900 text-white flex items-center justify-between">
               <div>
                 <span className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded bg-blue-500/30 text-blue-300 uppercase">
                   ID: #{selectedProduct.id} &bull; {selectedProduct.verificationStatus}
                 </span>
-                <h3 className="text-lg font-bold text-white mt-1 line-clamp-1">{selectedProduct.name}</h3>
+                <h3 id="product-inspector-title" className="text-lg font-bold text-white mt-1 line-clamp-1">{selectedProduct.name}</h3>
               </div>
               <button
+                type="button"
                 onClick={() => setSelectedProduct(null)}
                 className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition"
+                aria-label="Cerrar inspector"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -711,23 +846,33 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
                   </div>
 
                   <div>
-                    <label className="font-bold text-gray-700 block mb-1">Marca Comercial</label>
-                    <input
-                      type="text"
-                      value={editForm.brandName || ''}
-                      onChange={(e) => setEditForm({ ...editForm, brandName: e.target.value })}
-                      className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                    />
+                    <label htmlFor="pm-brand" className="font-bold text-gray-700 block mb-1">Marca Comercial</label>
+                    <select
+                      id="pm-brand"
+                      value={editForm.brandId ?? ''}
+                      onChange={(e) => setEditForm({ ...editForm, brandId: e.target.value ? Number(e.target.value) : null })}
+                      className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
+                    >
+                      <option value="">Sin marca</option>
+                      {brandOptions.map(b => (
+                        <option key={b.id} value={b.id}>{b.name}</option>
+                      ))}
+                    </select>
                   </div>
 
                   <div>
-                    <label className="font-bold text-gray-700 block mb-1">Categoría Principal</label>
-                    <input
-                      type="text"
-                      value={editForm.categoryName || ''}
-                      onChange={(e) => setEditForm({ ...editForm, categoryName: e.target.value })}
-                      className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                    />
+                    <label htmlFor="pm-category" className="font-bold text-gray-700 block mb-1">Categoría Principal</label>
+                    <select
+                      id="pm-category"
+                      value={editForm.categoryId ?? ''}
+                      onChange={(e) => setEditForm({ ...editForm, categoryId: e.target.value ? Number(e.target.value) : null })}
+                      className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
+                    >
+                      <option value="">Sin categoría</option>
+                      {categoryOptions.map(c => (
+                        <option key={c.id} value={c.id}>{c.parentId ? '— ' : ''}{c.name}</option>
+                      ))}
+                    </select>
                   </div>
 
                   <div>
@@ -814,7 +959,7 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
                   </div>
                   <div>
                     <span className="text-gray-500 block">Nivel de Confianza de la Fuente:</span>
-                    <span className="font-bold text-emerald-700">{selectedProduct.confidenceLevel || 'HIGH'}</span>
+                    <span className="font-bold text-gray-800">{selectedProduct.confidenceLevel || 'Sin dato'}</span>
                   </div>
                   <div>
                     <span className="text-gray-500 block">Última Actualización Registrada:</span>
@@ -825,26 +970,41 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
 
               {detailTab === 'QUALITY' && (
                 <div className="space-y-4 text-xs">
-                  <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
+                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl">
                     <div className="flex items-center justify-between">
-                      <span className="font-bold text-emerald-900">Score de Integridad Técnica</span>
-                      <span className="text-2xl font-black text-emerald-700">{selectedProduct.validationScore || 90}%</span>
+                      <span className="font-bold text-slate-900">Score de Integridad Técnica</span>
+                      <span className="text-2xl font-black text-slate-800">
+                        {selectedProduct.validationScore ? `${selectedProduct.validationScore}%` : 'Sin evaluar'}
+                      </span>
                     </div>
                   </div>
 
+                  {/* Real checks computed from the record, not a fixed checklist */}
                   <div className="space-y-2">
-                    <span className="font-bold text-gray-700 block">Auditoría Automática</span>
+                    <span className="font-bold text-gray-700 block">Revisión de datos de la ficha</span>
                     <div className="p-3 bg-gray-50 rounded-lg text-gray-600 space-y-1">
-                      <div className="flex items-center gap-2 text-emerald-700">
-                        <CheckCircle2 className="w-3.5 h-3.5" /> Nombre y modelo formalizados
-                      </div>
-                      <div className="flex items-center gap-2 text-emerald-700">
-                        <CheckCircle2 className="w-3.5 h-3.5" /> Fabricante vinculado a catálogo oficial
-                      </div>
-                      <div className="flex items-center gap-2 text-emerald-700">
-                        <CheckCircle2 className="w-3.5 h-3.5" /> Especificaciones parseadas y limpias
-                      </div>
+                      {[
+                        { ok: Boolean(selectedProduct.name && selectedProduct.model), label: 'Nombre y modelo registrados' },
+                        { ok: Boolean(selectedProduct.manufacturer || selectedProduct.brandId), label: 'Fabricante o marca asignados' },
+                        { ok: Boolean(selectedProduct.categoryId), label: 'Categoría asignada' },
+                        { ok: Boolean(selectedProduct.technicalSpecs?.trim()), label: 'Especificaciones técnicas' },
+                        { ok: Boolean(selectedProduct.images?.length), label: 'Al menos una imagen' },
+                        { ok: Boolean(selectedProduct.sourceUrl), label: 'URL de fuente registrada' },
+                      ].map(check => (
+                        <div key={check.label} className={`flex items-center gap-2 ${check.ok ? 'text-emerald-700' : 'text-amber-700'}`}>
+                          {check.ok ? <CheckCircle2 className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
+                          {check.ok ? check.label : `Falta: ${check.label.toLowerCase()}`}
+                        </div>
+                      ))}
                     </div>
+                    {Array.isArray(selectedProduct.validationIssues) && selectedProduct.validationIssues.length > 0 && (
+                      <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 space-y-1">
+                        <span className="font-bold block">Incidencias de la última validación</span>
+                        {selectedProduct.validationIssues.map((issue: any, i: number) => (
+                          <div key={i}>• {typeof issue === 'string' ? issue : issue.message || issue.description || JSON.stringify(issue)}</div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -853,6 +1013,7 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
             {/* Modal Footer */}
             <div className="p-4 bg-gray-50 border-t border-gray-200 flex items-center justify-between">
               <button
+                type="button"
                 onClick={() => setSelectedProduct(null)}
                 className="px-4 py-2 border border-gray-300 rounded-lg text-xs font-semibold text-gray-700 hover:bg-gray-100 transition"
               >
@@ -860,9 +1021,10 @@ export const ProductManager: React.FC<ProductManagerProps> = ({
               </button>
 
               <button
+                type="button"
                 disabled={isSaving}
                 onClick={handleSaveChanges}
-                className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold shadow-md transition flex items-center gap-2"
+                className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold shadow-md transition flex items-center gap-2 disabled:opacity-60"
               >
                 {isSaving && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
                 Guardar Cambios

@@ -79,7 +79,9 @@ interface ScaleBenchmark {
   notes: string;
 }
 
-export const PerformanceManager: React.FC = () => {
+export const PerformanceManager: React.FC<{ user?: any }> = ({ user }) => {
+  // Use the panel's signed-in user; auth.currentUser can be null right after a reload.
+  const getToken = async () => (user ?? auth.currentUser)?.getIdToken();
   const [summary, setSummary] = useState<PerformanceSummary | null>(null);
   const [checklist, setChecklist] = useState<AuditCheckItem[]>([]);
   const [benchmarks, setBenchmarks] = useState<ScaleBenchmark[]>([]);
@@ -92,7 +94,8 @@ export const PerformanceManager: React.FC = () => {
   const fetchPerformanceData = async () => {
     try {
       setIsLoading(true);
-      const token = await auth.currentUser?.getIdToken();
+      const token = await getToken();
+      if (!token) return;
       const headers = { Authorization: `Bearer ${token}` };
 
       const [summaryRes, checkRes, benchRes] = await Promise.all([
@@ -130,7 +133,8 @@ export const PerformanceManager: React.FC = () => {
     try {
       setIsSimulating(true);
       setSimulationResult(null);
-      const token = await auth.currentUser?.getIdToken();
+      const token = await getToken();
+      if (!token) return;
       const res = await fetch('/api/admin/performance/simulate-load', {
         method: 'POST',
         headers: {
@@ -153,7 +157,8 @@ export const PerformanceManager: React.FC = () => {
 
   const handleClearCache = async (tag?: string) => {
     try {
-      const token = await auth.currentUser?.getIdToken();
+      const token = await getToken();
+      if (!token) return;
       const res = await fetch('/api/admin/performance/cache/clear', {
         method: 'POST',
         headers: {
@@ -175,7 +180,8 @@ export const PerformanceManager: React.FC = () => {
 
   const handleClearRegressions = async () => {
     try {
-      const token = await auth.currentUser?.getIdToken();
+      const token = await getToken();
+      if (!token) return;
       const res = await fetch('/api/admin/performance/regressions/clear', {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },

@@ -3,7 +3,7 @@ import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "node:url";
 import { createServer as createViteServer } from "vite";
-import { requireAuth, AuthRequest } from "./src/middleware/auth.ts";
+import { requireAuth, requireAdmin, resolveUserRole, ADMIN_ROLES, AuthRequest } from "./src/middleware/auth.ts";
 import { db, initDatabase } from "./src/db/index.ts";
 import { brands, categories, products, quoteItems, quotes, tdrRequests, pharmacovigilanceReports, productImages, productDocuments, sources, scraperUrls, scrapingJobs, draftProducts, duplicateCases, productMergeHistory, backgroundJobs, sourceCandidates, users, autonomousSettings, autonomousAuditLogs, productVersions } from "./src/db/schema.ts";
 import { eq, ilike, or, and, desc, asc, sql, inArray, gte, type SQL } from "drizzle-orm";
@@ -88,6 +88,9 @@ async function startServer() {
     fs.mkdirSync(uploadsDir, { recursive: true });
   }
   app.use('/uploads', express.static(uploadsDir));
+
+  // Every admin API requires a signed-in user with an ADMIN or SUPER_ADMIN role.
+  app.use('/api/admin', requireAuth, requireAdmin);
 
   // ==========================================
   // COMMERCIAL & INSTITUTIONAL LEADS (QUOTES, TDR, CONTACT)
@@ -398,6 +401,21 @@ async function startServer() {
       res.json(reports);
     } catch (e: any) {
       res.status(500).json({ error: "Failed to fetch pharmacovigilance reports" });
+    }
+  });
+
+  // Admin: Update Pharmacovigilance Report Status
+  app.patch("/api/admin/pharmacovigilance/:id/status", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const { status } = req.body;
+      if (isNaN(id) || !status) {
+        return res.status(400).json({ error: "ID y estado requeridos" });
+      }
+      await db.update(pharmacovigilanceReports).set({ status: String(status) }).where(eq(pharmacovigilanceReports.id, id));
+      res.json({ success: true, message: `Estado del reporte actualizado a ${status}` });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || "Error updating report status" });
     }
   });
 
@@ -2040,7 +2058,8 @@ ${urls}
       const uid = req.user!.uid;
       const email = req.user!.email!;
       const user = await getOrCreateUser(uid, email);
-      res.json(user);
+      const role = await resolveUserRole(req);
+      res.json({ ...user, role, isAdmin: ADMIN_ROLES.includes(role) });
     } catch (e) {
       console.error(e);
       res.status(500).json({ error: "Failed to sync user" });
@@ -2237,21 +2256,39 @@ ${urls}
   // Get Admin Catalog Products with Brand, Category, Image and Verification Status
   app.get("/api/admin/catalog/products", requireAuth, async (req: AuthRequest, res) => {
     try {
-      const { status, search, limit = 50, offset = 0 } = req.query;
+      const { status, search, manufacturer, categoryId, brandId, issue, limit = 50, offset = 0 } = req.query;
       
-      let conditions = [];
+      let conditions: SQL[] = [];
       if (status && status !== 'ALL') {
         conditions.push(eq(products.verificationStatus, String(status)));
       }
       if (search) {
-        const query = `%${search}%`;
+        const query = `%${String(search).trim()}%`;
         conditions.push(
           or(
             ilike(products.name, query),
             ilike(products.model, query),
+            ilike(products.catalogNumber, query),
             ilike(products.manufacturer, query)
-          )
+          )!
         );
+      }
+      if (manufacturer) {
+        conditions.push(ilike(products.manufacturer, String(manufacturer).trim()));
+      }
+      if (categoryId && !isNaN(Number(categoryId))) {
+        conditions.push(or(eq(products.categoryId, Number(categoryId)), eq(products.subcategoryId, Number(categoryId)))!);
+      }
+      if (brandId && !isNaN(Number(brandId))) {
+        conditions.push(eq(products.brandId, Number(brandId)));
+      }
+      // Data-quality filters run in SQL so pagination and totals stay correct.
+      if (issue === 'NO_IMAGE') {
+        conditions.push(sql`NOT EXISTS (SELECT 1 FROM ${productImages} WHERE ${productImages.productId} = ${products.id})`);
+      } else if (issue === 'NO_MODEL') {
+        conditions.push(sql`COALESCE(TRIM(${products.model}), '') = ''`);
+      } else if (issue === 'NO_SPECS') {
+        conditions.push(sql`COALESCE(TRIM(${products.technicalSpecs}), '') = ''`);
       }
 
       const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -2262,6 +2299,7 @@ ${urls}
           name: products.name,
           slug: products.slug,
           model: products.model,
+          catalogNumber: products.catalogNumber,
           manufacturer: products.manufacturer,
           brandId: products.brandId,
           brandName: brands.name,
@@ -2273,6 +2311,7 @@ ${urls}
           publicationStatus: products.publicationStatus,
           verificationStatus: products.verificationStatus,
           confidenceLevel: products.confidenceLevel,
+          validationScore: products.validationScore,
           sourceUrl: products.sourceUrl,
           createdAt: products.createdAt,
           updatedAt: products.updatedAt,
@@ -2728,8 +2767,26 @@ ${urls}
   app.patch("/api/admin/users/:id/role", requireAuth, async (req: AuthRequest, res) => {
     try {
       const { role } = req.body;
-      await db.update(users).set({ role }).where(eq(users.id, Number(req.params.id)));
-      res.json({ success: true });
+      const ASSIGNABLE_ROLES = ['SUPER_ADMIN', 'ADMIN', 'CATALOG_MANAGER', 'QUALITY_ANALYST', 'USER'];
+      if (!ASSIGNABLE_ROLES.includes(role)) {
+        return res.status(400).json({ error: "Rol no válido." });
+      }
+      const targetId = Number(req.params.id);
+      const [target] = await db.select().from(users).where(eq(users.id, targetId)).limit(1);
+      if (!target) {
+        return res.status(404).json({ error: "Usuario no encontrado." });
+      }
+      if (target.uid === req.user!.uid) {
+        return res.status(400).json({ error: "No puede cambiar su propio rol." });
+      }
+      // Only a SUPER_ADMIN may grant, change or remove administrator roles.
+      const callerRole = await resolveUserRole(req);
+      const touchesAdmin = ADMIN_ROLES.includes(role) || ADMIN_ROLES.includes(target.role || 'USER');
+      if (touchesAdmin && callerRole !== 'SUPER_ADMIN') {
+        return res.status(403).json({ error: "Solo un SUPER_ADMIN puede asignar o retirar roles de administrador." });
+      }
+      await db.update(users).set({ role }).where(eq(users.id, targetId));
+      res.json({ success: true, role });
     } catch (e) {
       console.error(e);
       res.status(500).json({ error: "Failed to update role" });
