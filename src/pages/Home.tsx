@@ -65,33 +65,6 @@ export function Home() {
   const [loadingProducts, setLoadingProducts] = useState<boolean>(true);
   const [searchTerm, setSearchTerm] = useState('');
   
-  // FASE 07: Banner Interactivo
-  const [currentSlide, setCurrentSlide] = useState(0);
-  const heroSlides = [
-    {
-      image: "https://images.unsplash.com/photo-1581594693702-fbdc51b2763b?ixlib=rb-4.0.3&auto=format&fit=crop&w=2000&q=80",
-      title: "Soluciones Médicas y Suministro Integral para Instituciones de Salud",
-      subtitle: "Catálogo multimarca con fichas técnicas homologadas, trazabilidad clínica y cotizaciones inmediatas para hospitales, clínicas, laboratorios y comités de compra en todo el Perú."
-    },
-    {
-      image: "https://images.unsplash.com/photo-1516549655169-df83a0774514?ixlib=rb-4.0.3&auto=format&fit=crop&w=2000&q=80",
-      title: "Equipamiento de Alta Complejidad para UCI",
-      subtitle: "Monitores multiparámetro, ventiladores mecánicos y camas eléctricas con certificación internacional y soporte técnico continuo."
-    },
-    {
-      image: "https://images.unsplash.com/photo-1579684385127-1ef15d508118?ixlib=rb-4.0.3&auto=format&fit=crop&w=2000&q=80",
-      title: "Instrumental Quirúrgico de Precisión",
-      subtitle: "Acero alemán certificado para intervenciones críticas. Cajas quirúrgicas completas y herramientas especializadas para cada especialidad."
-    }
-  ];
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentSlide((prev) => (prev + 1) % heroSlides.length);
-    }, 6000);
-    return () => clearInterval(timer);
-  }, []);
-
   const quickSearchSuggestions = [
     'Monitores UCI',
     'Camas Eléctricas',
@@ -103,7 +76,8 @@ export function Home() {
 
   useEffect(() => {
     setLoadingProducts(true);
-    fetch('/api/products?limit=12')
+    // Fetch a wider sample so the category tabs have products of their own to show.
+    fetch('/api/products?limit=60')
       .then(res => res.json())
       .then(data => {
         const items = Array.isArray(data) ? data : (data.items || []);
@@ -130,7 +104,8 @@ export function Home() {
         if (tab === 'instrumental') return cat.includes('instrumental') || cat.includes('quirurg');
         return true;
       });
-      setFilteredProducts(filtered.length > 0 ? filtered.slice(0, 8) : products.slice(0, 8));
+      // An empty tab shows the empty state (with a link to the catalog) instead of unrelated products.
+      setFilteredProducts(filtered.slice(0, 8));
     }
   };
 
@@ -178,12 +153,12 @@ export function Home() {
         schemaObj={homeSchema}
       />
       
-      <main id="homepage-main" className="min-h-screen bg-[#F8FAFC] overflow-hidden">
+      <main id="homepage-main" className="min-h-screen bg-[#F8FAFC] overflow-x-clip">
         
         {/* 1. HERO SECTION MASTER (Formato Cinematográfico 16:9 con 3 Capas de Profundidad) */}
         <section 
           id="hero-master-izcor"
-          className="relative min-h-[660px] lg:min-h-[820px] flex items-center overflow-hidden bg-[#0D2232] text-white"
+          className="relative z-20 min-h-[660px] lg:min-h-[820px] flex items-center bg-[#0D2232] text-white"
         >
           {/* CAPA 1: Fotografía Corporativa Médica Realista en Alta Resolución */}
           <div 
@@ -499,9 +474,14 @@ export function Home() {
                   whileInView="visible" 
                   viewport={{ once: true }} 
                   variants={fadeUp}
-                  className="bg-white rounded-2xl border border-slate-200/90 shadow-2xs hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer group flex flex-col justify-between h-full relative overflow-hidden"
-                  onClick={() => navigate((cat as any).href || (cat.slug ? `/productos?category=${cat.slug}` : '/productos'))}
+                  className="bg-white rounded-2xl border border-slate-200/90 shadow-2xs hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer group flex flex-col justify-between h-full relative overflow-hidden focus-within:ring-2 focus-within:ring-brand-cyan"
                 >
+                  {/* Whole card is a real link: keyboard focusable, middle-click / new tab work */}
+                  <Link
+                    to={(cat as any).href || (cat.slug ? `/categorias/${cat.slug}` : '/productos')}
+                    className="absolute inset-0 z-30 focus:outline-none"
+                    aria-label={cat.title}
+                  />
                   <div className="absolute top-0 left-0 h-1 w-0 bg-brand-cyan transition-all duration-300 group-hover:w-full z-20" />
                   
                   {/* Visual Header con Imagen IA */}
@@ -874,7 +854,7 @@ export function Home() {
               <div className="inline-flex animate-marquee hover:pause gap-4 md:gap-8 w-max">
                 {/* Doble render para que el loop sea fluido */}
                 {[...Array(2)].map((_, groupIdx) => (
-                  <div key={groupIdx} className="flex gap-4 md:gap-8 shrink-0">
+                  <div key={groupIdx} className="flex gap-4 md:gap-8 shrink-0" aria-hidden={groupIdx > 0 || undefined}>
                     {[
                       { name: 'Mindray', origin: 'Equipos UCI & Monitoreo' },
                       { name: 'NOPA Instruments', origin: 'Instrumental Quirúrgico' },
@@ -885,9 +865,10 @@ export function Home() {
                       { name: 'Edan', origin: 'Diagnóstico por Imágenes' },
                       { name: 'Bowa', origin: 'Electrocirugía' }
                     ].map((brand) => (
-                      <div 
+                      <Link 
                         key={brand.name + groupIdx}
-                        onClick={() => navigate(`/productos?search=${encodeURIComponent(brand.name)}`)}
+                        to={`/productos?search=${encodeURIComponent(brand.name)}`}
+                        tabIndex={groupIdx > 0 ? -1 : undefined}
                         className="w-48 sm:w-56 p-5 rounded-2xl bg-white border border-slate-200/90 shadow-sm hover:shadow-md hover:border-[#2C3E50] transition-all cursor-pointer group flex flex-col items-center justify-center text-center shrink-0"
                       >
                         <span className="text-base sm:text-lg font-black text-[#2C3E50] group-hover:text-brand-cyan transition-colors tracking-tight">
@@ -896,7 +877,7 @@ export function Home() {
                         <span className="text-[10px] font-semibold text-slate-500 mt-1 uppercase tracking-wider">
                           {brand.origin}
                         </span>
-                      </div>
+                      </Link>
                     ))}
                   </div>
                 ))}

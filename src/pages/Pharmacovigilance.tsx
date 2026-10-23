@@ -232,7 +232,7 @@ export function Pharmacovigilance() {
                         
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div className="space-y-1.5 sm:col-span-2">
-                            <label htmlFor="patientName" className="text-xs font-semibold text-slate-700">Nombre y Apellidos</label>
+                            <label htmlFor="patientName" className="text-xs font-semibold text-slate-700">Nombre y apellidos de quien reporta <span className="text-red-500" aria-hidden="true">*</span></label>
                             <input
                               type="text"
                               id="patientName"
@@ -246,7 +246,7 @@ export function Pharmacovigilance() {
                           </div>
                           
                           <div className="space-y-1.5">
-                            <label htmlFor="contactEmail" className="text-xs font-semibold text-slate-700">Correo Electrónico</label>
+                            <label htmlFor="contactEmail" className="text-xs font-semibold text-slate-700">Correo Electrónico <span className="text-red-500" aria-hidden="true">*</span></label>
                             <input
                               type="email"
                               id="contactEmail"
@@ -260,7 +260,7 @@ export function Pharmacovigilance() {
                           </div>
                           
                           <div className="space-y-1.5">
-                            <label htmlFor="contactPhone" className="text-xs font-semibold text-slate-700">Teléfono / Celular</label>
+                            <label htmlFor="contactPhone" className="text-xs font-semibold text-slate-700">Teléfono / Celular <span className="text-red-500" aria-hidden="true">*</span></label>
                             <input
                               type="tel"
                               id="contactPhone"
@@ -283,7 +283,7 @@ export function Pharmacovigilance() {
                               onChange={handleInputChange}
                               className="peer sr-only"
                             />
-                            <div className="w-5 h-5 rounded border border-slate-300 bg-white group-hover:border-brand-cyan peer-checked:bg-brand-cyan peer-checked:border-brand-cyan transition-colors" />
+                            <div className="w-5 h-5 rounded border border-slate-300 bg-white group-hover:border-brand-cyan peer-checked:bg-brand-cyan peer-checked:border-brand-cyan peer-focus-visible:ring-2 peer-focus-visible:ring-brand-cyan peer-focus-visible:ring-offset-2 transition-colors" />
                             <ShieldCheck className="w-3.5 h-3.5 text-white absolute opacity-0 peer-checked:opacity-100 transition-opacity" strokeWidth={3} />
                           </div>
                           <span className="text-xs text-slate-600 font-medium">Soy un profesional de la salud reportando en nombre de un paciente.</span>
@@ -299,7 +299,7 @@ export function Pharmacovigilance() {
                         
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div className="space-y-1.5 sm:col-span-2">
-                            <label htmlFor="productName" className="text-xs font-semibold text-slate-700">Nombre del Producto / Dispositivo</label>
+                            <label htmlFor="productName" className="text-xs font-semibold text-slate-700">Nombre del Producto / Dispositivo <span className="text-red-500" aria-hidden="true">*</span></label>
                             <input
                               type="text"
                               id="productName"
@@ -334,7 +334,7 @@ export function Pharmacovigilance() {
                         </h3>
                         
                         <div className="space-y-1.5">
-                          <label htmlFor="symptomDescription" className="text-xs font-semibold text-slate-700">Descripción del Síntoma o Incidente Adverso</label>
+                          <label htmlFor="symptomDescription" className="text-xs font-semibold text-slate-700">Descripción del Síntoma o Incidente Adverso <span className="text-red-500" aria-hidden="true">*</span></label>
                           <textarea
                             id="symptomDescription"
                             name="symptomDescription"
@@ -354,7 +354,10 @@ export function Pharmacovigilance() {
                         className="w-full btn-primary h-12 flex items-center justify-center gap-2 shadow-md disabled:opacity-70 disabled:cursor-not-allowed"
                       >
                         {isSubmitting ? (
-                          <span className="w-5 h-5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                          <>
+                            <span className="w-5 h-5 rounded-full border-2 border-white/30 border-t-white animate-spin" aria-hidden="true" />
+                            <span>Enviando reporte...</span>
+                          </>
                         ) : (
                           <>
                             <Send className="w-5 h-5" />

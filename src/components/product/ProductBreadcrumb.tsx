@@ -33,6 +33,7 @@ export const ProductBreadcrumb: React.FC<ProductBreadcrumbProps> = ({
           to="/" 
           className="inline-flex items-center gap-1 hover:text-brand-navy text-slate-500 transition-colors"
           title="Ir a página de inicio"
+          aria-label="Inicio"
         >
           <Home className="w-3.5 h-3.5" />
           <span className="hidden sm:inline">Inicio</span>

@@ -203,7 +203,7 @@ export function Footer() {
                 Conforme a la Ley 29571 (Código de Protección al Consumidor), tienes derecho a registrar tu reclamo o queja.
               </p>
               <Link
-                to="/contacto"
+                to="/contacto?asunto=reclamo"
                 className="inline-flex items-center gap-1.5 w-full justify-center py-2 px-3 rounded-lg bg-red-700 hover:bg-red-600 text-white font-bold text-[10px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
                 aria-label="Registrar una queja o reclamo"
               >

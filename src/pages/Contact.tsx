@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { 
   Phone, Mail, MapPin, Clock, Send, CheckCircle2, 
@@ -8,6 +9,7 @@ import { SeoHead } from '../components/seo/SeoHead';
 import { Button } from '../components/ui/Button';
 
 export function Contact() {
+  const [searchParams] = useSearchParams();
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [contactError, setContactError] = useState<string | null>(null);
@@ -16,7 +18,8 @@ export function Contact() {
     institution: '',
     email: '',
     phone: '',
-    subject: 'Cotización de Equipos Médicos',
+    // The footer's "Libro de Reclamaciones" link opens the form on the complaint subject.
+    subject: searchParams.get('asunto') === 'reclamo' ? 'Reclamo o Queja' : 'Cotización de Equipos Médicos',
     message: ''
   });
 
@@ -35,6 +38,7 @@ export function Contact() {
         throw new Error(errData.error || `Error del servidor (${res.status})`);
       }
       setSubmitted(true);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err: any) {
       setContactError(err.message || 'Error de red. Por favor intente nuevamente.');
     } finally {
@@ -182,10 +186,11 @@ export function Contact() {
                     <form onSubmit={handleSubmit} className="space-y-5">
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                         <div>
-                          <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">
+                          <label htmlFor="contact-name" className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">
                             Nombre y Apellidos *
                           </label>
                           <input
+                            id="contact-name"
                             type="text"
                             required
                             value={formData.name}
@@ -196,10 +201,11 @@ export function Contact() {
                         </div>
 
                         <div>
-                          <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">
+                          <label htmlFor="contact-institution" className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">
                             Institución / Empresa
                           </label>
                           <input
+                            id="contact-institution"
                             type="text"
                             value={formData.institution}
                             onChange={(e) => setFormData({ ...formData, institution: e.target.value })}
@@ -211,10 +217,11 @@ export function Contact() {
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                         <div>
-                          <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">
+                          <label htmlFor="contact-email" className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">
                             Correo Corporativo *
                           </label>
                           <input
+                            id="contact-email"
                             type="email"
                             required
                             value={formData.email}
@@ -225,10 +232,11 @@ export function Contact() {
                         </div>
 
                         <div>
-                          <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">
+                          <label htmlFor="contact-phone" className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">
                             Teléfono / WhatsApp *
                           </label>
                           <input
+                            id="contact-phone"
                             type="tel"
                             required
                             value={formData.phone}
@@ -240,10 +248,11 @@ export function Contact() {
                       </div>
 
                       <div>
-                        <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">
+                        <label htmlFor="contact-subject" className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">
                           Motivo de Consulta
                         </label>
                         <select
+                            id="contact-subject"
                           value={formData.subject}
                           onChange={(e) => setFormData({ ...formData, subject: e.target.value })}
                           className="w-full h-11 px-3.5 rounded-xl border border-slate-300 text-slate-900 text-sm focus:outline-none focus:border-brand-cyan focus:ring-2 focus:ring-brand-cyan/20 transition-all bg-slate-50/50"
@@ -253,14 +262,16 @@ export function Contact() {
                           <option value="Servicio Técnico y Calibración">Servicio Técnico y Calibración</option>
                           <option value="Distribución y Alianzas">Distribución y Alianzas</option>
                           <option value="Otro Requerimiento">Otro Requerimiento</option>
+                          <option value="Reclamo o Queja">Reclamo o Queja</option>
                         </select>
                       </div>
 
                       <div>
-                        <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">
+                        <label htmlFor="contact-message" className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">
                           Mensaje o Detalle del Requerimiento *
                         </label>
                         <textarea
+                            id="contact-message"
                           required
                           rows={4}
                           value={formData.message}

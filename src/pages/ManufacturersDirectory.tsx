@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { 
   Building2, Search, ShieldCheck, Tag, Package, ChevronRight, 
   ExternalLink, Globe, AlertCircle, Loader2, ArrowUpDown, Layers 
@@ -22,16 +22,25 @@ interface ManufacturerItem {
 
 export function ManufacturersDirectory() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const navigate = useNavigate();
   const [query, setQuery] = useState(searchParams.get('search') || '');
   const [manufacturers, setManufacturers] = useState<ManufacturerItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(1);
+  const [loadError, setLoadError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+  // Page lives in the URL so refresh, Back and shared links keep it.
+  const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10) || 1);
+  const setPage = (next: number) => {
+    const newParams = new URLSearchParams(searchParams);
+    if (next > 1) newParams.set('page', String(next)); else newParams.delete('page');
+    setSearchParams(newParams);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
   const limit = 24;
 
   const fetchManufacturers = async (searchStr = '', pageNum = 1) => {
     setLoading(true);
+    setLoadError(false);
     try {
       const params = new URLSearchParams();
       if (searchStr) params.set('search', searchStr);
@@ -45,6 +54,7 @@ export function ManufacturersDirectory() {
       setTotal(data.total || 0);
     } catch (e) {
       console.error(e);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -54,12 +64,12 @@ export function ManufacturersDirectory() {
     const searchVal = searchParams.get('search') || '';
     setQuery(searchVal);
     fetchManufacturers(searchVal, page);
-  }, [searchParams, page]);
+  }, [searchParams, reloadKey]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setPage(1);
     const newParams = new URLSearchParams(searchParams);
+    newParams.delete('page');
     if (query.trim()) {
       newParams.set('search', query.trim());
     } else {
@@ -152,6 +162,18 @@ export function ManufacturersDirectory() {
             <Loader2 className="w-8 h-8 text-brand-navy animate-spin mx-auto mb-3" />
             <p className="text-sm font-bold text-slate-600">Cargando directorio de fabricantes...</p>
           </div>
+        ) : loadError ? (
+          <div role="alert" className="bg-rose-50 rounded-2xl border border-rose-200 p-12 text-center">
+            <AlertCircle className="w-10 h-10 text-rose-500 mx-auto mb-3" />
+            <p className="text-sm font-bold text-rose-800">No se pudo cargar el directorio de fabricantes.</p>
+            <button
+              type="button"
+              onClick={() => setReloadKey(k => k + 1)}
+              className="mt-4 h-10 px-5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold"
+            >
+              Reintentar
+            </button>
+          </div>
         ) : manufacturers.length === 0 ? (
           <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center">
             <AlertCircle className="w-10 h-10 text-slate-400 mx-auto mb-3" />
@@ -161,10 +183,10 @@ export function ManufacturersDirectory() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {manufacturers.map((mfg) => (
-              <div 
+              <Link 
                 key={mfg.id}
-                onClick={() => navigate(`/fabricantes/${mfg.id}`)}
-                className="bg-white rounded-2xl border border-slate-200/90 p-6 shadow-xs hover:shadow-md hover:border-brand-navy/30 transition-all cursor-pointer group flex flex-col justify-between"
+                to={`/fabricantes/${mfg.id}`}
+                className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-cyan bg-white rounded-2xl border border-slate-200/90 p-6 shadow-xs hover:shadow-md hover:border-brand-navy/30 transition-all cursor-pointer group flex flex-col justify-between"
               >
                 <div>
                   <div className="flex items-start justify-between gap-3 mb-4">
@@ -203,7 +225,7 @@ export function ManufacturersDirectory() {
                     <ChevronRight className="w-3.5 h-3.5" />
                   </span>
                 </div>
-              </div>
+              </Link>
             ))}
           </div>
         )}
@@ -212,7 +234,8 @@ export function ManufacturersDirectory() {
         {totalPages > 1 && (
           <div className="flex items-center justify-center gap-2 pt-6">
             <button
-              onClick={() => setPage(p => Math.max(1, p - 1))}
+              type="button"
+              onClick={() => setPage(Math.max(1, page - 1))}
               disabled={page === 1}
               className="px-4 py-2 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 transition-colors"
             >
@@ -222,7 +245,8 @@ export function ManufacturersDirectory() {
               Página {page} de {totalPages}
             </span>
             <button
-              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              type="button"
+              onClick={() => setPage(Math.min(totalPages, page + 1))}
               disabled={page === totalPages}
               className="px-4 py-2 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 transition-colors"
             >
