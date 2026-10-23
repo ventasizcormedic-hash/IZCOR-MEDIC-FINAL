@@ -132,6 +132,23 @@ El proyecto usa Drizzle con soporte a:
 
 La inicialización se realiza desde [src/db/index.ts](src/db/index.ts) y las migraciones de esquema se encuentran en [drizzle](drizzle).
 
+## Acceso al panel administrativo
+
+El panel `/admin` y todas las rutas `/api/admin/*` exigen una cuenta de Google con rol `ADMIN` o `SUPER_ADMIN` en la tabla `users`.
+
+Para designar al primer administrador:
+
+1. Inicie sesión una vez en `/admin` con la cuenta que será administradora (verá "Acceso restringido"; esto registra la cuenta).
+2. En el servidor, ejecute:
+
+```bash
+npm run set-role -- correo@ejemplo.com SUPER_ADMIN
+```
+
+3. Recargue `/admin`. Desde **Usuarios & Permisos**, un `SUPER_ADMIN` puede asignar o retirar roles de administrador; un usuario no puede cambiar su propio rol.
+
+En desarrollo local (`npm run dev`) el token `dev-admin-token` actúa como `SUPER_ADMIN` para pruebas de API; el servidor compilado (`npm start`) nunca lo acepta.
+
 ## Firebase
 
 La configuración web de Firebase está en [firebase-applet-config.json](firebase-applet-config.json) y se usa desde [src/lib/firebase.ts](src/lib/firebase.ts). La configuración administrativa se usa en [src/lib/firebase-admin.ts](src/lib/firebase-admin.ts).
