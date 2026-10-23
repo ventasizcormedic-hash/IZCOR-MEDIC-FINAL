@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Package } from 'lucide-react';
 
-interface OptimizedImageProps extends React.ImgHTMLAttributes<HTMLImageElement> {
+interface OptimizedImageProps extends Omit<React.ImgHTMLAttributes<HTMLImageElement>, 'src'> {
   src: string | null | undefined;
   alt: string;
   fallbackIcon?: React.ReactNode;

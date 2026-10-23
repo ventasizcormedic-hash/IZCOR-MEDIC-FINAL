@@ -1,5 +1,5 @@
 import { drizzle as drizzlePg } from 'drizzle-orm/node-postgres';
-import { drizzle as drizzlePglite } from 'drizzle-orm/pglite';
+import { drizzle as drizzlePglite, type PgliteDatabase } from 'drizzle-orm/pglite';
 import { PGlite } from '@electric-sql/pglite';
 import { Pool } from 'pg';
 import * as schema from './schema.ts';
@@ -66,7 +66,7 @@ global._activeDb = drizzlePglite(defaultPglite, { schema });
 global._dbEngineType = 'pglite';
 
 // Export a proxy so any external references to `db` always resolve to the active engine
-export const db: any = new Proxy({}, {
+export const db = new Proxy({}, {
   get(target, prop, receiver) {
     const current = global._activeDb || drizzlePglite(getPgliteClient(), { schema });
     const val = Reflect.get(current, prop, receiver);
@@ -75,7 +75,7 @@ export const db: any = new Proxy({}, {
     }
     return val;
   }
-});
+}) as unknown as PgliteDatabase<typeof schema>;
 
 // Database initialization, schema bootstrap & auto-seeding
 export async function initDatabase(): Promise<{ engine: 'postgres' | 'pglite'; seeded: boolean }> {

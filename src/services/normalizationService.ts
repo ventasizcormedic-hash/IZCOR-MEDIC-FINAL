@@ -1,13 +1,13 @@
 export interface RawProductData {
   name: string;
-  brand?: string;
-  manufacturer?: string;
-  category?: string;
-  subcategory?: string;
+  brand?: string | null;
+  manufacturer?: string | null;
+  category?: string | null;
+  subcategory?: string | null;
   specifications?: Array<{ name: string; value: string; unit?: string; source?: string }>;
-  presentation?: string;
-  applications?: string;
-  productType?: string;
+  presentation?: string | null;
+  applications?: string | null;
+  productType?: string | null;
   [key: string]: any;
 }
 

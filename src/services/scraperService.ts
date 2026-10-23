@@ -234,7 +234,7 @@ export class MedicalScraperService {
     });
 
     // 4. Image Extraction
-    let imageUrl = null;
+    let imageUrl: string | null = null;
     // Look for a large/main image
     $('img').each((_, el) => {
       if (imageUrl) return;
@@ -245,7 +245,7 @@ export class MedicalScraperService {
     });
 
     // 5. PDF Datasheet Extraction
-    let datasheetUrl = null;
+    let datasheetUrl: string | null = null;
     $('a[href$=".pdf"]').each((_, el) => {
        if (datasheetUrl) return;
        const href = $(el).attr('href');

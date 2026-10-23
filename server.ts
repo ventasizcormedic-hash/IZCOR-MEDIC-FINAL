@@ -6,7 +6,7 @@ import { createServer as createViteServer } from "vite";
 import { requireAuth, AuthRequest } from "./src/middleware/auth.ts";
 import { db, initDatabase } from "./src/db/index.ts";
 import { brands, categories, products, quoteItems, quotes, tdrRequests, pharmacovigilanceReports, productImages, productDocuments, sources, scraperUrls, scrapingJobs, draftProducts, duplicateCases, productMergeHistory, backgroundJobs, sourceCandidates, users, autonomousSettings, autonomousAuditLogs, productVersions } from "./src/db/schema.ts";
-import { eq, ilike, or, and, desc, asc, sql, inArray, gte } from "drizzle-orm";
+import { eq, ilike, or, and, desc, asc, sql, inArray, gte, type SQL } from "drizzle-orm";
 import { getOrCreateUser } from "./src/db/users.ts";
 import { catalogConsolidationService } from "./src/services/catalogConsolidationService.ts";
 import { normalizationService } from "./src/services/normalizationService.ts";
@@ -750,7 +750,7 @@ ${urls}
       const limitNum = Math.min(100, Math.max(1, parseInt(String(limit), 10) || 24));
       const offset = (pageNum - 1) * limitNum;
 
-      let conditions = [
+      let conditions: SQL[] = [
         inArray(products.categoryId, categoryIds),
         eq(products.publicationStatus, 'PUBLISHED')
       ];
@@ -761,7 +761,7 @@ ${urls}
           ilike(products.name, searchTerm),
           ilike(products.model, searchTerm),
           ilike(products.catalogNumber, searchTerm)
-        ));
+        )!);
       }
 
       if (brandId) {
@@ -772,7 +772,7 @@ ${urls}
         conditions.push(or(
           ilike(products.manufacturer, String(manufacturer)),
           ilike(brands.manufacturer, String(manufacturer))
-        ));
+        )!);
       }
 
       let orderByArg = desc(products.createdAt);
