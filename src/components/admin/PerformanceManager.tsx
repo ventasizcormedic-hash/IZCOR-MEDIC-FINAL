@@ -49,6 +49,7 @@ interface RegressionAlert {
 interface PerformanceSummary {
   avgLatencyMs: number;
   p95Ms: number;
+  p99Ms?: number;
   totalRequestsRecorded: number;
   errorRate: number;
   cacheHitRatio: number;
@@ -93,9 +94,10 @@ export const PerformanceManager: React.FC<{ user?: any }> = ({ user }) => {
   const [simulationResult, setSimulationResult] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
-  const fetchPerformanceData = async () => {
+  // Background polling refreshes silently; only explicit loads show the spinner.
+  const fetchPerformanceData = async (silent = false) => {
     try {
-      setIsLoading(true);
+      if (!silent) setIsLoading(true);
       const token = await getToken();
       if (!token) return;
       const headers = { Authorization: `Bearer ${token}` };
@@ -120,6 +122,7 @@ export const PerformanceManager: React.FC<{ user?: any }> = ({ user }) => {
       }
     } catch (e) {
       console.error('Error fetching performance data:', e);
+      if (!silent) toast.error('No se pudieron cargar las métricas de rendimiento.');
     } finally {
       setIsLoading(false);
     }
@@ -127,7 +130,7 @@ export const PerformanceManager: React.FC<{ user?: any }> = ({ user }) => {
 
   useEffect(() => {
     fetchPerformanceData();
-    const interval = setInterval(fetchPerformanceData, 15000);
+    const interval = setInterval(() => fetchPerformanceData(true), 15000);
     return () => clearInterval(interval);
   }, []);
 
@@ -158,6 +161,12 @@ export const PerformanceManager: React.FC<{ user?: any }> = ({ user }) => {
   };
 
   const handleClearCache = async (tag?: string) => {
+    const ok = await confirmDialog({
+      title: tag ? `¿Vaciar la caché "${tag}"?` : '¿Vaciar toda la caché global?',
+      message: 'Las próximas consultas serán más lentas hasta que la caché se vuelva a llenar.',
+      confirmLabel: 'Vaciar caché',
+    });
+    if (!ok) return;
     try {
       const token = await getToken();
       if (!token) return;
@@ -172,11 +181,15 @@ export const PerformanceManager: React.FC<{ user?: any }> = ({ user }) => {
       const data = await res.json();
       if (res.ok) {
         setActionMessage(data.message);
+        toast.success(data.message || 'Operación completada.');
         setTimeout(() => setActionMessage(null), 4000);
         await fetchPerformanceData();
+      } else {
+        toast.error(data.error || 'La operación no se pudo completar.');
       }
     } catch (e: any) {
       console.error(e);
+      toast.error(`Error de conexión: ${e.message}`);
     }
   };
 
@@ -191,11 +204,15 @@ export const PerformanceManager: React.FC<{ user?: any }> = ({ user }) => {
       const data = await res.json();
       if (res.ok) {
         setActionMessage(data.message);
+        toast.success(data.message || 'Operación completada.');
         setTimeout(() => setActionMessage(null), 4000);
         await fetchPerformanceData();
+      } else {
+        toast.error(data.error || 'La operación no se pudo completar.');
       }
     } catch (e: any) {
       console.error(e);
+      toast.error(`Error de conexión: ${e.message}`);
     }
   };
 
@@ -237,7 +254,7 @@ export const PerformanceManager: React.FC<{ user?: any }> = ({ user }) => {
             </button>
 
             <button
-              onClick={fetchPerformanceData}
+              onClick={() => fetchPerformanceData()}
               disabled={isLoading}
               className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors"
               title="Actualizar métricas"
@@ -266,7 +283,7 @@ export const PerformanceManager: React.FC<{ user?: any }> = ({ user }) => {
                 {summary.p95Ms} <span className="text-xs text-slate-400 font-normal">ms</span>
               </div>
               <span className="text-[10px] text-indigo-300 mt-1 inline-flex items-center gap-1 font-mono">
-                <Gauge className="w-3 h-3" /> P99: ~{Math.round(summary.p95Ms * 1.4)}ms
+                <Gauge className="w-3 h-3" /> P99: {summary.p99Ms ?? 0}ms
               </span>
             </div>
 

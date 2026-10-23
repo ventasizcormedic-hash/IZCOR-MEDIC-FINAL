@@ -71,7 +71,7 @@ export const AuditLogsManager: React.FC<AuditLogsManagerProps> = ({ user }) => {
         <button
           onClick={fetchLogs}
           className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50 text-gray-600 transition"
-          title="Recargar auditoría"
+          title="Recargar auditoría" aria-label="Recargar auditoría"
         >
           <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
         </button>

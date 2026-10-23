@@ -2151,6 +2151,7 @@ ${urls}
         autoVerified: sql<number>`count(*) filter (where ${products.verifiedBy} = 'AUTONOMOUS_ENGINE')`,
         avgScore: sql<number>`coalesce(round(avg(${products.validationScore}) filter (where ${products.validationScore} > 0)), 0)`,
         withSpecs: sql<number>`count(*) filter (where coalesce(trim(${products.technicalSpecs}), '') <> '')`,
+        withModel: sql<number>`count(*) filter (where coalesce(trim(${products.model}), '') <> '' and coalesce(trim(${products.catalogNumber}), '') <> '')`,
         withSource: sql<number>`count(*) filter (where coalesce(trim(${products.sourceUrl}), '') <> '')`,
         withImage: sql<number>`count(*) filter (where exists (select 1 from ${productImages} where ${productImages.productId} = ${products.id}))`,
         incomplete: sql<number>`count(*) filter (where coalesce(trim(${products.model}), '') = '' or coalesce(trim(${products.technicalSpecs}), '') = '')`,
@@ -2244,6 +2245,7 @@ ${urls}
           imagesRatio,
           specsRatio,
           freshnessRatio,
+          modelsRatio: pct(qualityRow?.withModel || 0),
         },
         automation: {
           activeJobs: Number(jobsRes[0]?.count || 0),
@@ -2261,6 +2263,7 @@ ${urls}
         },
         recentActivity: recentAudit,
         priorityAlerts,
+        generatedAt: new Date().toISOString(),
       };
 
       res.json(stats);
@@ -2840,10 +2843,15 @@ ${urls}
   // Media (Images & Documents) Center
   app.get("/api/admin/media/overview", requireAuth, async (req: AuthRequest, res) => {
     try {
-      const [totalImages, totalDocs, totalProds] = await Promise.all([
+      const [totalImages, totalDocs, totalProds, coverage] = await Promise.all([
         db.select({ count: sql<number>`count(*)` }).from(productImages),
         db.select({ count: sql<number>`count(*)` }).from(productDocuments),
         db.select({ count: sql<number>`count(*)` }).from(products),
+        // Products that have no image / no document at all (not totals minus totals).
+        db.select({
+          withoutImage: sql<number>`count(*) filter (where not exists (select 1 from ${productImages} where ${productImages.productId} = ${products.id}))`,
+          withoutDoc: sql<number>`count(*) filter (where not exists (select 1 from ${productDocuments} where ${productDocuments.productId} = ${products.id}))`,
+        }).from(products),
       ]);
 
       const prodsCount = Number(totalProds[0]?.count || 0);
@@ -2854,10 +2862,8 @@ ${urls}
         totalImages: imagesCount,
         totalDocuments: docsCount,
         totalProducts: prodsCount,
-        productsWithoutImage: Math.max(0, prodsCount - Math.min(prodsCount, imagesCount)),
-        productsWithoutDoc: Math.max(0, prodsCount - Math.min(prodsCount, docsCount)),
-        brokenImages: 0,
-        brokenDocs: 0,
+        productsWithoutImage: Number(coverage[0]?.withoutImage || 0),
+        productsWithoutDoc: Number(coverage[0]?.withoutDoc || 0),
       });
     } catch (e) {
       console.error(e);

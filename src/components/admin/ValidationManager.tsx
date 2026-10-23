@@ -778,6 +778,8 @@ export function ValidationManager({ user }: ValidationManagerProps) {
                 </div>
               </div>
               <button 
+                type="button"
+                aria-label="Cerrar"
                 onClick={() => setSelectedProduct(null)} 
                 className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/10 transition-colors"
               >

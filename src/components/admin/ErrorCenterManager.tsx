@@ -65,7 +65,7 @@ export const ErrorCenterManager: React.FC<ErrorCenterManagerProps> = ({ user, on
         <button
           onClick={fetchErrors}
           className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50 text-gray-600 transition"
-          title="Recargar incidencias"
+          title="Recargar incidencias" aria-label="Recargar incidencias"
         >
           <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
         </button>

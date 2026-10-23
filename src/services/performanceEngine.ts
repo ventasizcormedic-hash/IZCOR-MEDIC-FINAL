@@ -182,11 +182,11 @@ export class PerformanceEngine {
 
       const avgLatencyMs = durations.length > 0 
         ? Math.round((durations.reduce((a, b) => a + b, 0) / durations.length) * 10) / 10 
-        : (this.baselines.get(m.id) || 40);
+        : 0; // No samples yet: report 0 instead of an invented latency
 
-      const p50Ms = durations.length > 0 ? this.percentile(durations, 50) : avgLatencyMs;
-      const p95Ms = durations.length > 0 ? this.percentile(durations, 95) : Math.round(avgLatencyMs * 1.5);
-      const p99Ms = durations.length > 0 ? this.percentile(durations, 99) : Math.round(avgLatencyMs * 2.2);
+      const p50Ms = durations.length > 0 ? this.percentile(durations, 50) : 0;
+      const p95Ms = durations.length > 0 ? this.percentile(durations, 95) : 0;
+      const p99Ms = durations.length > 0 ? this.percentile(durations, 99) : 0;
 
       let status: ModuleMetric['status'] = 'OPTIMAL';
       if (p95Ms > m.target * 1.5 || errorRate > 5) {
@@ -218,16 +218,18 @@ export class PerformanceEngine {
     const durations = this.samples.map(s => s.durationMs);
     const avgLatencyMs = durations.length > 0 
       ? Math.round((durations.reduce((a, b) => a + b, 0) / durations.length) * 10) / 10 
-      : 38.5;
-    const p95Ms = durations.length > 0 ? this.percentile(durations, 95) : 68.2;
+      : 0;
+    const p95Ms = durations.length > 0 ? this.percentile(durations, 95) : 0;
+    const p99Ms = durations.length > 0 ? this.percentile(durations, 99) : 0;
     const errorCount = this.samples.filter(s => s.statusCode >= 500).length;
-    const errorRate = totalRequests > 0 ? Math.round((errorCount / totalRequests) * 100) / 100 : 0.08;
+    const errorRate = totalRequests > 0 ? Math.round((errorCount / totalRequests) * 100) / 100 : 0;
 
     const cacheStats = cacheEngine.getStats();
 
     return {
       avgLatencyMs,
       p95Ms,
+      p99Ms,
       totalRequestsRecorded: totalRequests,
       errorRate,
       cacheHitRatio: cacheStats.hitRatio,

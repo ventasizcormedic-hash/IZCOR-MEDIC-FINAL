@@ -47,6 +47,11 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({ user }) => {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
+    if (!settings.scraper && !(await confirmDialog({
+      title: '¿Guardar con el motor de extracción detenido?',
+      message: 'Funciona como parada de emergencia: no se ejecutarán extracciones hasta que lo vuelva a activar.',
+      confirmLabel: 'Guardar y detener',
+    }))) return;
     setIsSaving(true);
     setSaveMsg(null);
     try {
@@ -62,6 +67,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({ user }) => {
       const data = await res.json();
       if (res.ok) {
         setSaveMsg("Configuraciones del sistema guardadas exitosamente.");
+        toast.success('Configuración guardada.');
       } else {
         toast.error(data.error || "Error al guardar configuraciones");
       }
@@ -84,6 +90,8 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({ user }) => {
         </div>
 
         <button
+          type="button"
+          aria-label="Recargar configuración"
           onClick={fetchSettings}
           className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50 text-gray-600 transition"
           title="Recargar configuración"
@@ -116,11 +124,12 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({ user }) => {
               <label className="relative inline-flex items-center cursor-pointer">
                 <input
                   type="checkbox"
+                  aria-label="Motor de Extracción (Scraper)"
                   checked={settings.scraper}
                   onChange={(e) => setSettings({ ...settings, scraper: e.target.checked })}
                   className="sr-only peer"
                 />
-                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus-visible:ring-2 peer-focus-visible:ring-blue-500 peer-focus-visible:ring-offset-2 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
               </label>
             </div>
 
@@ -132,11 +141,12 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({ user }) => {
               <label className="relative inline-flex items-center cursor-pointer">
                 <input
                   type="checkbox"
+                  aria-label="Motor Autónomo de Calidad"
                   checked={settings.qualityControl}
                   onChange={(e) => setSettings({ ...settings, qualityControl: e.target.checked })}
                   className="sr-only peer"
                 />
-                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus-visible:ring-2 peer-focus-visible:ring-blue-500 peer-focus-visible:ring-offset-2 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
               </label>
             </div>
           </div>
@@ -151,12 +161,13 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({ user }) => {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
             <div>
-              <label className="font-bold text-gray-700 block mb-1">
+              <label htmlFor="settings-score" className="font-bold text-gray-700 block mb-1">
                 Score Mínimo para Auto-Publicación ({settings.autoPublishScore}%)
               </label>
               <input
+                id="settings-score"
                 type="range"
-                min={60}
+                min={70}
                 max={98}
                 value={settings.autoPublishScore}
                 onChange={(e) => setSettings({ ...settings, autoPublishScore: Number(e.target.value) })}
@@ -168,8 +179,9 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({ user }) => {
             </div>
 
             <div>
-              <label className="font-bold text-gray-700 block mb-1">Modo Operativo del Motor</label>
+              <label htmlFor="settings-mode" className="font-bold text-gray-700 block mb-1">Modo Operativo del Motor</label>
               <select
+                id="settings-mode"
                 value={settings.operatingMode}
                 onChange={(e) => setSettings({ ...settings, operatingMode: e.target.value })}
                 className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-semibold text-xs"
@@ -182,8 +194,9 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({ user }) => {
             </div>
 
             <div>
-              <label className="font-bold text-gray-700 block mb-1">Tolerancia de Riesgo</label>
+              <label htmlFor="settings-risk" className="font-bold text-gray-700 block mb-1">Tolerancia de Riesgo</label>
               <select
+                id="settings-risk"
                 value={settings.riskThreshold}
                 onChange={(e) => setSettings({ ...settings, riskThreshold: e.target.value })}
                 className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-semibold text-xs"

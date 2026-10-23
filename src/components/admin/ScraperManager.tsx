@@ -590,7 +590,7 @@ export const ScraperManager: React.FC<ScraperManagerProps> = ({ user }) => {
                 <Globe className="w-5 h-5 text-brand-cyan" />
                 Registrar URL para el Scraper
               </h3>
-              <button onClick={() => setIsUrlModalOpen(false)} className="text-slate-300 hover:text-white">
+              <button type="button" aria-label="Cerrar" onClick={() => setIsUrlModalOpen(false)} className="p-1 text-slate-300 hover:text-white">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -686,7 +686,7 @@ export const ScraperManager: React.FC<ScraperManagerProps> = ({ user }) => {
                   <p className="text-[11px] text-slate-400 font-mono truncate max-w-md">{selectedDraft.productUrl || selectedDraft.sourceUrl}</p>
                 </div>
               </div>
-              <button onClick={() => setSelectedDraft(null)} className="text-slate-300 hover:text-white">
+              <button type="button" aria-label="Cerrar" onClick={() => setSelectedDraft(null)} className="p-1 text-slate-300 hover:text-white">
                 <X className="w-5 h-5" />
               </button>
             </div>
