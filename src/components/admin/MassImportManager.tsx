@@ -5,12 +5,14 @@ import {
   CheckCircle2, Server, DatabaseBackup, ArrowRight, Settings, FileText, ChevronRight
 } from 'lucide-react';
 import Papa from 'papaparse';
+import { useAdminFeedback } from './ui/AdminFeedback';
 
 interface MassImportManagerProps {
   user: User | null;
 }
 
 export function MassImportManager({ user }: MassImportManagerProps) {
+  const { toast, confirm: confirmDialog } = useAdminFeedback();
   const [activeTab, setActiveTab] = useState<'upload' | 'jobs'>('upload');
   
   // Upload State
@@ -107,17 +109,29 @@ export function MassImportManager({ user }: MassImportManagerProps) {
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ totalItems: totalRows, config: { fieldMap, fileName: file.name } })
       });
-      const { job } = await createRes.json();
+      const createData = await createRes.json().catch(() => ({}));
+      if (!createRes.ok || !createData.job) {
+        throw new Error(createData.error || 'No se pudo crear el trabajo de importación.');
+      }
+      const { job } = createData;
       setCurrentJob(job);
 
       // 2. Stream File in Chunks to not blow up memory
       let processed = 0;
-      let chunkData: any[] = [];
-      const CHUNK_SIZE = 1000;
+      let failed = false;
+
+      const fail = (message: string) => {
+        if (failed) return;
+        failed = true;
+        setIsUploading(false);
+        toast.error(`${message} La importación no se inició; puede reintentarla.`);
+      };
 
       Papa.parse(file, {
         header: true,
+        error: (err) => fail(`No se pudo leer el archivo: ${err.message}.`),
         chunk: async (results, parser) => {
+          if (failed) { parser.abort(); return; }
           parser.pause(); // Pause parser while we upload this chunk
 
           const mappedChunk = results.data.filter((r: any) => Object.keys(r).length > 0).map((row: any) => {
@@ -132,42 +146,70 @@ export function MassImportManager({ user }: MassImportManagerProps) {
           });
 
           if (mappedChunk.length > 0) {
-            await fetch(`/api/admin/imports/${job.id}/chunk`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-              body: JSON.stringify({ records: mappedChunk })
-            });
+            try {
+              const chunkRes = await fetch(`/api/admin/imports/${job.id}/chunk`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ records: mappedChunk })
+              });
+              if (!chunkRes.ok) throw new Error(`HTTP ${chunkRes.status}`);
+            } catch (chunkErr: any) {
+              fail(`Falló la carga de un lote de filas (${chunkErr.message}).`);
+              parser.abort();
+              return;
+            }
             processed += mappedChunk.length;
             setUploadProgress(Math.round((processed / totalRows) * 100));
           }
           parser.resume();
         },
         complete: async () => {
+          if (failed) return;
           // 3. Auto-start the job once fully uploaded
-          await fetch(`/api/admin/imports/${job.id}/start`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}` }
-          });
-          setIsUploading(false);
-          setActiveTab('jobs');
+          try {
+            const startRes = await fetch(`/api/admin/imports/${job.id}/start`, {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (!startRes.ok) throw new Error(`HTTP ${startRes.status}`);
+            toast.success(`Archivo cargado (${processed} filas). La importación está en curso.`);
+            setActiveTab('jobs');
+          } catch (startErr: any) {
+            toast.error(`Las filas se cargaron pero no se pudo iniciar la importación (${startErr.message}). Iníciela desde la pestaña de trabajos.`);
+            setActiveTab('jobs');
+          } finally {
+            setIsUploading(false);
+          }
         }
       });
 
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
       setIsUploading(false);
-      alert('Error al iniciar la importación.');
+      toast.error(e.message || 'Error al iniciar la importación.');
     }
   };
 
   const handleJobAction = async (jobId: number, action: 'start' | 'pause' | 'cancel') => {
     if (!user) return;
+    if (action === 'cancel' && !(await confirmDialog({
+      title: '¿Cancelar esta importación?',
+      message: 'Las filas aún no procesadas no se importarán.',
+      confirmLabel: 'Cancelar importación',
+      cancelLabel: 'Volver',
+    }))) return;
     try {
       const token = await user.getIdToken();
-      await fetch(`/api/admin/imports/${jobId}/${action}`, {
+      const res = await fetch(`/api/admin/imports/${jobId}/${action}`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || 'No se pudo aplicar la acción al trabajo.');
+      } else {
+        toast.success(action === 'start' ? 'Importación reanudada.' : action === 'pause' ? 'Importación pausada.' : 'Importación cancelada.');
+      }
       fetchJobs();
     } catch (e) {
       console.error(e);
@@ -320,7 +362,7 @@ export function MassImportManager({ user }: MassImportManagerProps) {
             jobs.map((job) => (
               <div key={job.id} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row gap-4 justify-between">
                 <div className="space-y-2 flex-1">
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
                     <span className="font-mono font-black text-slate-900">Job #{job.id}</span>
                     <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase ${
                       job.status === 'RUNNING' ? 'bg-brand-cyan text-white animate-pulse' :
@@ -339,7 +381,7 @@ export function MassImportManager({ user }: MassImportManagerProps) {
                   
                   <div className="flex flex-wrap gap-4 text-[11px] font-bold text-slate-600">
                     <span className="text-brand-cyan">Procesados: {job.processedItems} / {job.totalItems}</span>
-                    <span className="text-emerald-600">Completados (Checkpoint guardado)</span>
+                    {job.status === 'COMPLETED' && <span className="text-emerald-600">Completado</span>}
                     {job.errorCount > 0 && <span className="text-red-600">Errores: {job.errorCount}</span>}
                   </div>
                 </div>

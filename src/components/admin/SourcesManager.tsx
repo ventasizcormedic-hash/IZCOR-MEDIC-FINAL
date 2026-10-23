@@ -4,6 +4,7 @@ import {
   Globe, Plus, Search, Filter, RefreshCw, CheckCircle2, AlertTriangle, 
   Trash2, Edit, ExternalLink, ShieldCheck, Database, Layers, Check, X, Loader2
 } from 'lucide-react';
+import { useAdminFeedback } from './ui/AdminFeedback';
 
 interface Source {
   id: number;
@@ -31,6 +32,7 @@ interface SourcesManagerProps {
 }
 
 export const SourcesManager: React.FC<SourcesManagerProps> = ({ user }) => {
+  const { toast, confirm: confirmDialog } = useAdminFeedback();
   const [sources, setSources] = useState<Source[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -149,18 +151,18 @@ export const SourcesManager: React.FC<SourcesManagerProps> = ({ user }) => {
         setTimeout(() => setActionMessage(null), 4000);
       } else {
         const err = await res.json();
-        alert(err.error || 'Error al guardar fuente');
+        toast.error(err.error || 'Error al guardar fuente');
       }
     } catch (e) {
       console.error(e);
-      alert('Error de conexión');
+      toast.error('Error de conexión');
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('¿Está seguro de eliminar o desactivar esta fuente de información?')) return;
+    if (!(await confirmDialog({ title: '¿Eliminar esta fuente de información?', message: 'Se eliminará de la lista de fuentes de extracción.', confirmLabel: 'Eliminar' }))) return;
     try {
       const token = await user.getIdToken();
       const res = await fetch(`/api/admin/sources/${id}`, {

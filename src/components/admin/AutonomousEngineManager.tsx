@@ -6,6 +6,7 @@ import {
   Layers, Clock, ArrowRight, Eye, ChevronRight, Filter, 
   Sliders, Activity, Check, Info, FileText, Zap, AlertOctagon
 } from 'lucide-react';
+import { useAdminFeedback } from './ui/AdminFeedback';
 
 export interface AutonomousEngineManagerProps {
   user: User | null;
@@ -13,6 +14,7 @@ export interface AutonomousEngineManagerProps {
 }
 
 export const AutonomousEngineManager: React.FC<AutonomousEngineManagerProps> = ({ user, onRefresh }) => {
+  const { toast, confirm: confirmDialog } = useAdminFeedback();
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<any>(null);
   const [settings, setSettings] = useState<any>(null);

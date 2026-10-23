@@ -19,6 +19,7 @@ import {
   HardDrive
 } from 'lucide-react';
 import { auth } from '../../lib/firebase';
+import { useAdminFeedback } from './ui/AdminFeedback';
 
 interface ModuleMetric {
   name: string;
@@ -80,6 +81,7 @@ interface ScaleBenchmark {
 }
 
 export const PerformanceManager: React.FC<{ user?: any }> = ({ user }) => {
+  const { toast, confirm: confirmDialog } = useAdminFeedback();
   // Use the panel's signed-in user; auth.currentUser can be null right after a reload.
   const getToken = async () => (user ?? auth.currentUser)?.getIdToken();
   const [summary, setSummary] = useState<PerformanceSummary | null>(null);

@@ -4,12 +4,14 @@ import {
   Activity, Server, Database, Cpu, Layers, RefreshCw, 
   Play, CheckCircle2, AlertTriangle, XCircle, Clock, ShieldCheck, Zap
 } from 'lucide-react';
+import { useAdminFeedback } from './ui/AdminFeedback';
 
 interface SystemHealthManagerProps {
   user: User | null;
 }
 
 export function SystemHealthManager({ user }: SystemHealthManagerProps) {
+  const { toast, confirm: confirmDialog } = useAdminFeedback();
   const [healthData, setHealthData] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
   const [creatingJob, setCreatingJob] = useState(false);

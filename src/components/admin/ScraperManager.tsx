@@ -5,6 +5,8 @@ import {
   Trash2, Edit, ExternalLink, ShieldCheck, Database, Play, Pause, 
   Check, X, Loader2, FileText, Image as ImageIcon, Layers, Cpu, Sparkles, AlertCircle
 } from 'lucide-react';
+import { useAdminFeedback } from './ui/AdminFeedback';
+import { useModalBehavior } from '../../hooks/useModalBehavior';
 
 interface ScraperUrl {
   id: number;
@@ -70,6 +72,7 @@ interface ScraperManagerProps {
 }
 
 export const ScraperManager: React.FC<ScraperManagerProps> = ({ user }) => {
+  const { toast, confirm: confirmDialog } = useAdminFeedback();
   const [activeSubTab, setActiveSubTab] = useState<'dashboard' | 'urls' | 'drafts' | 'jobs'>('dashboard');
   const [urls, setUrls] = useState<ScraperUrl[]>([]);
   const [jobs, setJobs] = useState<ScrapingJob[]>([]);
@@ -125,140 +128,106 @@ export const ScraperManager: React.FC<ScraperManagerProps> = ({ user }) => {
     fetchData();
   }, []);
 
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const urlModalRef = React.useRef<HTMLDivElement>(null);
+  const draftModalRef = React.useRef<HTMLDivElement>(null);
+  useModalBehavior(isUrlModalOpen, () => setIsUrlModalOpen(false), urlModalRef);
+  useModalBehavior(Boolean(selectedDraft), () => setSelectedDraft(null), draftModalRef);
+
+  // Shared request wrapper: one place for auth, busy state and visible success/error feedback.
+  const runAction = async (
+    key: string,
+    url: string,
+    init: RequestInit,
+    successMessage: (data: any) => string,
+    onSuccess?: () => void
+  ) => {
+    if (busyAction) return false;
+    setBusyAction(key);
+    try {
+      const token = await user.getIdToken();
+      const res = await fetch(url, {
+        ...init,
+        headers: { ...(init.headers || {}), 'Authorization': `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.success === false) {
+        toast.error(data.error || data.message || `La operación falló (HTTP ${res.status}).`);
+        return false;
+      }
+      toast.success(successMessage(data));
+      onSuccess?.();
+      fetchData();
+      return true;
+    } catch (e: any) {
+      console.error(e);
+      toast.error(`Error de conexión: ${e.message}`);
+      return false;
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   const handleCreateUrl = async (e: React.FormEvent) => {
     e.preventDefault();
-    try {
-      const token = await user.getIdToken();
-      const res = await fetch('/api/admin/scraper/urls', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(urlFormData)
-      });
-      if (res.ok) {
+    await runAction(
+      'create-url',
+      '/api/admin/scraper/urls',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(urlFormData) },
+      () => 'URL de scraping registrada correctamente.',
+      () => {
         setIsUrlModalOpen(false);
         setUrlFormData({ url: '', manufacturer: '', brandName: '', country: 'Perú', sourceType: 'PRODUCT_LIST', priority: 2, notes: '' });
-        fetchData();
-        setActionMessage('URL de scraping registrada correctamente');
-        setTimeout(() => setActionMessage(null), 4000);
       }
-    } catch (e) {
-      console.error(e);
-    }
+    );
   };
 
-  const handleValidateUrl = async (id: number) => {
-    try {
-      const token = await user.getIdToken();
-      const res = await fetch(`/api/admin/scraper/urls/${id}/validate`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setActionMessage(data.message);
-        fetchData();
-        setTimeout(() => setActionMessage(null), 4000);
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  };
+  const handleValidateUrl = (id: number) =>
+    runAction(`validate-${id}`, `/api/admin/scraper/urls/${id}/validate`, { method: 'POST' }, (data) => data.message || 'URL validada.');
 
   const handleDeleteUrl = async (id: number) => {
-    if (!confirm('¿Está seguro de eliminar esta URL del scraper?')) return;
-    try {
-      const token = await user.getIdToken();
-      await fetch(`/api/admin/scraper/urls/${id}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      fetchData();
-    } catch (e) {
-      console.error(e);
-    }
+    if (!(await confirmDialog({ title: '¿Eliminar esta URL del scraper?', confirmLabel: 'Eliminar' }))) return;
+    await runAction(`delete-${id}`, `/api/admin/scraper/urls/${id}`, { method: 'DELETE' }, () => 'URL eliminada.');
   };
 
   const handleStartExtraction = async () => {
+    const ok = await confirmDialog({
+      title: '¿Iniciar la extracción masiva?',
+      message: 'Se visitarán todas las URLs activas y los productos encontrados se guardarán como borradores para revisión. Puede tardar varios minutos.',
+      confirmLabel: 'Iniciar extracción',
+      tone: 'primary',
+    });
+    if (!ok) return;
     setExtracting(true);
     try {
-      const token = await user.getIdToken();
-      const res = await fetch('/api/admin/scraper/jobs', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({})
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setActionMessage(data.message);
-        fetchData();
-        setTimeout(() => setActionMessage(null), 5000);
-      }
-    } catch (e) {
-      console.error(e);
+      await runAction(
+        'extract',
+        '/api/admin/scraper/jobs',
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) },
+        (data) => data.message || 'Extracción finalizada.'
+      );
     } finally {
       setExtracting(false);
     }
   };
 
-  const handleApproveDraft = async (id: number) => {
-    try {
-      const token = await user.getIdToken();
-      const res = await fetch(`/api/admin/scraper/drafts/${id}/approve`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) {
-        fetchData();
-        setSelectedDraft(null);
-        setActionMessage('Producto DRAFT aprobado correctamente');
-        setTimeout(() => setActionMessage(null), 4000);
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  };
+  const handleApproveDraft = (id: number) =>
+    runAction(`approve-${id}`, `/api/admin/scraper/drafts/${id}/approve`, { method: 'POST' }, () => 'Borrador aprobado.', () => setSelectedDraft(null));
 
   const handlePublishDraft = async (id: number) => {
-    try {
-      const token = await user.getIdToken();
-      const res = await fetch(`/api/admin/scraper/drafts/${id}/publish`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await res.json();
-      if (res.ok) {
-        fetchData();
-        setSelectedDraft(null);
-        setActionMessage(data.message);
-        setTimeout(() => setActionMessage(null), 5000);
-      }
-    } catch (e) {
-      console.error(e);
-    }
+    const ok = await confirmDialog({
+      title: '¿Publicar este producto en el catálogo oficial?',
+      message: 'Se creará el producto como VERIFICADO y quedará visible en el sitio público.',
+      confirmLabel: 'Publicar',
+      tone: 'primary',
+    });
+    if (!ok) return;
+    await runAction(`publish-${id}`, `/api/admin/scraper/drafts/${id}/publish`, { method: 'POST' }, (data) => data.message || 'Producto publicado.', () => setSelectedDraft(null));
   };
 
   const handleRejectDraft = async (id: number) => {
-    try {
-      const token = await user.getIdToken();
-      const res = await fetch(`/api/admin/scraper/drafts/${id}/reject`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) {
-        fetchData();
-        setSelectedDraft(null);
-        setActionMessage('Producto DRAFT rechazado.');
-        setTimeout(() => setActionMessage(null), 4000);
-      }
-    } catch (e) {
-      console.error(e);
-    }
+    if (!(await confirmDialog({ title: '¿Rechazar este borrador?', confirmLabel: 'Rechazar' }))) return;
+    await runAction(`reject-${id}`, `/api/admin/scraper/drafts/${id}/reject`, { method: 'POST' }, () => 'Borrador rechazado.', () => setSelectedDraft(null));
   };
 
   const pendingDraftsCount = drafts.filter(d => d.status === 'DRAFT').length;
@@ -305,28 +274,28 @@ export const ScraperManager: React.FC<ScraperManagerProps> = ({ user }) => {
       )}
 
       {/* Navigation Sub-Tabs */}
-      <div className="flex items-center gap-2 border-b border-slate-200 pb-3">
+      <div className="flex items-center gap-2 border-b border-slate-200 pb-3 overflow-x-auto" role="tablist">
         <button
           onClick={() => setActiveSubTab('dashboard')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors ${activeSubTab === 'dashboard' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+          className={`shrink-0 whitespace-nowrap px-4 py-2 rounded-xl text-xs font-bold transition-colors ${activeSubTab === 'dashboard' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
         >
           Dashboard General
         </button>
         <button
           onClick={() => setActiveSubTab('urls')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors ${activeSubTab === 'urls' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+          className={`shrink-0 whitespace-nowrap px-4 py-2 rounded-xl text-xs font-bold transition-colors ${activeSubTab === 'urls' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
         >
           URLs Registradas ({urls.length})
         </button>
         <button
           onClick={() => setActiveSubTab('drafts')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors ${activeSubTab === 'drafts' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+          className={`shrink-0 whitespace-nowrap px-4 py-2 rounded-xl text-xs font-bold transition-colors ${activeSubTab === 'drafts' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
         >
           Productos DRAFT ({pendingDraftsCount})
         </button>
         <button
           onClick={() => setActiveSubTab('jobs')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors ${activeSubTab === 'jobs' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+          className={`shrink-0 whitespace-nowrap px-4 py-2 rounded-xl text-xs font-bold transition-colors ${activeSubTab === 'jobs' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
         >
           Historial de Trabajos ({totalJobsCount})
         </button>
@@ -449,20 +418,26 @@ export const ScraperManager: React.FC<ScraperManagerProps> = ({ user }) => {
                     </td>
                     <td className="py-4 px-4 font-bold text-slate-700">P{u.priority}</td>
                     <td className="py-4 px-4">
-                      <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700">{u.status}</span>
+                      <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${u.status === 'ACTIVE' ? 'bg-emerald-50 text-emerald-700' : u.status === 'ERROR' ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-slate-700'}`}>{u.status}</span>
                     </td>
                     <td className="py-4 px-6 text-right space-x-2">
                       <button
+                        type="button"
                         onClick={() => handleValidateUrl(u.id)}
-                        className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700"
+                        disabled={busyAction !== null}
+                        className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 disabled:opacity-50"
                         title="Validar URL"
+                        aria-label={`Validar ${u.url}`}
                       >
-                        <RefreshCw className="w-3.5 h-3.5" />
+                        <RefreshCw className={`w-3.5 h-3.5 ${busyAction === `validate-${u.id}` ? 'animate-spin' : ''}`} />
                       </button>
                       <button
+                        type="button"
                         onClick={() => handleDeleteUrl(u.id)}
-                        className="p-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-600"
+                        disabled={busyAction !== null}
+                        className="p-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 disabled:opacity-50"
                         title="Eliminar URL"
+                        aria-label={`Eliminar ${u.url}`}
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -481,6 +456,7 @@ export const ScraperManager: React.FC<ScraperManagerProps> = ({ user }) => {
           <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/50">
             <h2 className="text-sm font-bold text-slate-900">Productos en Estado DRAFT (Requieren Revisión Humana antes de Publicar)</h2>
             <select
+              aria-label="Filtrar borradores por estado"
               value={draftStatusFilter}
               onChange={(e) => setDraftStatusFilter(e.target.value)}
               className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs bg-white font-medium"
@@ -551,8 +527,10 @@ export const ScraperManager: React.FC<ScraperManagerProps> = ({ user }) => {
                       </button>
                       {d.status !== 'PUBLISHED' && (
                         <button
+                          type="button"
                           onClick={() => handlePublishDraft(d.id)}
-                          className="px-3 py-1.5 rounded-lg bg-brand-cyan hover:bg-[#0087a3] text-white font-bold transition-colors"
+                          disabled={busyAction !== null}
+                          className="px-3 py-1.5 rounded-lg bg-brand-cyan hover:bg-[#0087a3] text-white font-bold transition-colors disabled:opacity-50"
                         >
                           Publicar Oficial
                         </button>
@@ -605,8 +583,8 @@ export const ScraperManager: React.FC<ScraperManagerProps> = ({ user }) => {
 
       {/* Modal for Add URL */}
       {isUrlModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full overflow-hidden border border-slate-200 animate-in fade-in zoom-in duration-200">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4" onClick={() => setIsUrlModalOpen(false)}>
+          <div ref={urlModalRef} role="dialog" aria-modal="true" aria-label="Registrar URL para el Scraper" onClick={(e) => e.stopPropagation()} className="bg-white rounded-3xl shadow-2xl max-w-lg w-full max-h-[92vh] overflow-y-auto border border-slate-200 animate-in fade-in zoom-in duration-200">
             <div className="px-6 py-5 bg-slate-900 text-white flex items-center justify-between">
               <h3 className="font-bold text-base flex items-center gap-2">
                 <Globe className="w-5 h-5 text-brand-cyan" />
@@ -698,8 +676,8 @@ export const ScraperManager: React.FC<ScraperManagerProps> = ({ user }) => {
 
       {/* Modal for Draft Review - Deep Dossier */}
       {selectedDraft && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl shadow-2xl max-w-4xl w-full overflow-hidden border border-slate-200 animate-in fade-in zoom-in duration-200 max-h-[92vh] flex flex-col">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4" onClick={() => setSelectedDraft(null)}>
+          <div ref={draftModalRef} role="dialog" aria-modal="true" aria-label={`Expediente de producto borrador ${selectedDraft.id}`} onClick={(e) => e.stopPropagation()} className="bg-white rounded-3xl shadow-2xl max-w-4xl w-full overflow-hidden border border-slate-200 animate-in fade-in zoom-in duration-200 max-h-[92vh] flex flex-col">
             <div className="px-6 py-5 bg-[#2C3E50] text-white flex items-center justify-between flex-shrink-0">
               <div className="flex items-center gap-3">
                 <ShieldCheck className="w-5 h-5 text-brand-cyan" />
@@ -802,7 +780,7 @@ export const ScraperManager: React.FC<ScraperManagerProps> = ({ user }) => {
                   </div>
 
                   {displaySpecs && Array.isArray(displaySpecs) && displaySpecs.length > 0 && (
-                    <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+                    <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-x-auto">
                       <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 font-bold text-xs text-slate-800 flex items-center justify-between">
                         <span>Especificaciones Técnicas ({viewMode === 'normalized' ? 'Normalizadas con Unidades' : 'Valores Originales'})</span>
                         <span className="text-slate-400 text-[11px]">{displaySpecs.length} atributos</span>
@@ -938,23 +916,29 @@ export const ScraperManager: React.FC<ScraperManagerProps> = ({ user }) => {
               );
             })()}
 
-            <div className="px-6 py-4 bg-slate-100 border-t border-slate-200 flex items-center justify-between flex-shrink-0">
+            <div className="px-4 sm:px-6 py-4 bg-slate-100 border-t border-slate-200 flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-3 flex-shrink-0">
               <button
+                type="button"
                 onClick={() => handleRejectDraft(selectedDraft.id)}
-                className="px-4 py-2.5 rounded-xl bg-red-50 text-red-600 hover:bg-red-100 text-xs font-bold transition-colors"
+                disabled={busyAction !== null}
+                className="px-4 py-2.5 rounded-xl bg-red-50 text-red-600 hover:bg-red-100 text-xs font-bold transition-colors disabled:opacity-50"
               >
                 Rechazar Borrador
               </button>
-              <div className="flex items-center gap-3">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
                 <button
+                  type="button"
                   onClick={() => handleApproveDraft(selectedDraft.id)}
-                  className="px-4 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 text-xs font-bold transition-colors shadow-xs"
+                  disabled={busyAction !== null}
+                  className="px-4 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 text-xs font-bold transition-colors shadow-xs disabled:opacity-50"
                 >
                   Aprobar Borrador
                 </button>
                 <button
+                  type="button"
                   onClick={() => handlePublishDraft(selectedDraft.id)}
-                  className="px-6 py-2.5 rounded-xl bg-brand-cyan hover:bg-[#0087a3] text-white text-xs font-bold shadow-sm transition-colors flex items-center gap-1.5"
+                  disabled={busyAction !== null}
+                  className="px-6 py-2.5 rounded-xl bg-brand-cyan hover:bg-[#0087a3] text-white text-xs font-bold shadow-sm transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50"
                 >
                   <ShieldCheck className="w-4 h-4" />
                   Publicar en Catálogo Oficial

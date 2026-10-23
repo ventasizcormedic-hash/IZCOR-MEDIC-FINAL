@@ -5,6 +5,7 @@ import {
   ImageIcon, Activity, Zap, Check, ChevronRight, Sliders, Info, Server,
   Lock, ArrowUpRight, Gauge
 } from 'lucide-react';
+import { useAdminFeedback } from './ui/AdminFeedback';
 
 interface ReadinessReportProps {
   user: any;
@@ -15,6 +16,7 @@ export const ReadinessReportManager: React.FC<ReadinessReportProps> = ({
   user,
   onNavigateToTab,
 }) => {
+  const { toast, confirm: confirmDialog } = useAdminFeedback();
   const [report, setReport] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isRunningCheck, setIsRunningCheck] = useState(false);
@@ -92,7 +94,7 @@ export const ReadinessReportManager: React.FC<ReadinessReportProps> = ({
 
   const handleSafeStart = async () => {
     if (!user) return;
-    if (!window.confirm("¿Confirmas activar el modo SAFE START para ingesta de productos reales con lotes pequeños y Quality Gate estricto?")) {
+    if (!(await confirmDialog({ title: '¿Activar el modo SAFE START?', message: 'La ingesta de productos reales usará lotes pequeños y un Quality Gate estricto.', confirmLabel: 'Activar', tone: 'primary' }))) {
       return;
     }
     setIsActivatingSafeStart(true);

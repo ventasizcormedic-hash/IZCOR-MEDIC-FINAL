@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Layers, Folder, FolderPlus, Search, Edit, Trash2, CheckCircle2, RefreshCw, X, ChevronRight } from 'lucide-react';
+import { useAdminFeedback } from './ui/AdminFeedback';
+import { useModalBehavior } from '../../hooks/useModalBehavior';
 
 interface CategoryItem {
   id: number;
@@ -21,6 +23,7 @@ export const CategoriesManager: React.FC<CategoriesManagerProps> = ({
   user,
   onFilterProductsByCategory,
 }) => {
+  const { toast, confirm: confirmDialog } = useAdminFeedback();
   const [categories, setCategories] = useState<CategoryItem[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -42,15 +45,18 @@ export const CategoriesManager: React.FC<CategoriesManagerProps> = ({
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
-      if (res.ok && Array.isArray(data)) {
-        setCategories(data);
-      }
+      if (!res.ok || !Array.isArray(data)) throw new Error(data?.error || `HTTP ${res.status}`);
+      setCategories(data);
     } catch (err) {
       console.error(err);
+      toast.error('No se pudieron cargar las categorías.');
     } finally {
       setIsLoading(false);
     }
   };
+
+  const modalRef = React.useRef<HTMLDivElement>(null);
+  useModalBehavior(isModalOpen, () => setIsModalOpen(false), modalRef);
 
   useEffect(() => {
     fetchCategories();
@@ -89,17 +95,21 @@ export const CategoriesManager: React.FC<CategoriesManagerProps> = ({
           name: formName.trim(),
           parentId: formParentId,
           description: formDesc.trim(),
-          status: 'ACTIVE'
+          // New categories start active; editing keeps the current status.
+          ...(editCategory ? {} : { status: 'ACTIVE' }),
         })
       });
       if (res.ok) {
         setIsModalOpen(false);
+        toast.success(editCategory ? 'Categoría actualizada.' : 'Categoría creada.');
         fetchCategories();
       } else {
-        alert("Error al guardar categoría");
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || "Error al guardar categoría");
       }
     } catch (err) {
       console.error(err);
+      toast.error('Error de conexión al guardar la categoría.');
     } finally {
       setIsSaving(false);
     }
@@ -121,9 +131,11 @@ export const CategoriesManager: React.FC<CategoriesManagerProps> = ({
 
         <div className="flex items-center gap-2">
           <button
+            type="button"
             onClick={fetchCategories}
             className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50 text-gray-600 transition"
             title="Recargar"
+            aria-label="Recargar categorías"
           >
             <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
           </button>
@@ -141,6 +153,7 @@ export const CategoriesManager: React.FC<CategoriesManagerProps> = ({
         <Search className="w-4 h-4 text-gray-400" />
         <input
           type="text"
+          aria-label="Buscar categoría"
           placeholder="Buscar categoría médica..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
@@ -148,8 +161,8 @@ export const CategoriesManager: React.FC<CategoriesManagerProps> = ({
         />
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-        <table className="w-full text-left border-collapse text-xs">
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
+        <table className="w-full min-w-[640px] text-left border-collapse text-xs">
           <thead>
             <tr className="bg-gray-50/80 border-b border-gray-200 text-[11px] font-bold text-gray-500 uppercase tracking-wider">
               <th className="p-3.5">Categoría</th>
@@ -205,13 +218,16 @@ export const CategoriesManager: React.FC<CategoriesManagerProps> = ({
                   <td className="p-3.5 text-right">
                     <div className="flex items-center justify-end gap-1">
                       <button
+                        type="button"
                         onClick={() => handleOpenEdit(cat)}
-                        className="p-1.5 rounded-md hover:bg-blue-50 text-blue-600 transition"
+                        className="p-2 rounded-md hover:bg-blue-50 text-blue-600 transition"
                         title="Editar categoría"
+                        aria-label={`Editar categoría ${cat.name}`}
                       >
                         <Edit className="w-3.5 h-3.5" />
                       </button>
                       <button
+                        type="button"
                         onClick={() => onFilterProductsByCategory?.(cat.id)}
                         className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-md font-semibold text-[11px] transition inline-flex items-center gap-1"
                       >
@@ -228,21 +244,22 @@ export const CategoriesManager: React.FC<CategoriesManagerProps> = ({
 
       {/* Modal Añadir / Editar */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn" onClick={() => setIsModalOpen(false)}>
+          <div ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="category-modal-title" onClick={(e) => e.stopPropagation()} className="bg-white rounded-2xl shadow-2xl max-w-md w-full max-h-[90vh] overflow-y-auto">
             <div className="p-5 bg-slate-900 text-white flex items-center justify-between">
-              <h3 className="text-base font-bold">
+              <h3 id="category-modal-title" className="text-base font-bold">
                 {editCategory ? 'Editar Categoría' : 'Nueva Categoría Médica'}
               </h3>
-              <button onClick={() => setIsModalOpen(false)}>
+              <button type="button" onClick={() => setIsModalOpen(false)} aria-label="Cerrar">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <form onSubmit={handleSave} className="p-5 space-y-4 text-xs">
               <div>
-                <label className="font-bold text-gray-700 block mb-1">Nombre de la Categoría</label>
+                <label htmlFor="cat-name" className="font-bold text-gray-700 block mb-1">Nombre de la Categoría</label>
                 <input
+                  id="cat-name"
                   type="text"
                   required
                   placeholder="Ej: Equipos de Diagnóstico Clínico"
@@ -253,8 +270,9 @@ export const CategoriesManager: React.FC<CategoriesManagerProps> = ({
               </div>
 
               <div>
-                <label className="font-bold text-gray-700 block mb-1">Categoría Padre (Opcional)</label>
+                <label htmlFor="cat-parent" className="font-bold text-gray-700 block mb-1">Categoría Padre (Opcional)</label>
                 <select
+                  id="cat-parent"
                   value={formParentId || ''}
                   onChange={(e) => setFormParentId(e.target.value ? Number(e.target.value) : null)}
                   className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
@@ -267,8 +285,9 @@ export const CategoriesManager: React.FC<CategoriesManagerProps> = ({
               </div>
 
               <div>
-                <label className="font-bold text-gray-700 block mb-1">Descripción</label>
+                <label htmlFor="cat-desc" className="font-bold text-gray-700 block mb-1">Descripción</label>
                 <textarea
+                  id="cat-desc"
                   rows={3}
                   placeholder="Breve descripción del alcance..."
                   value={formDesc}

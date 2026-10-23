@@ -4,12 +4,14 @@ import {
   ShieldCheck, AlertTriangle, GitMerge, CheckCircle, XCircle, 
   Search, RefreshCw, Layers, ExternalLink, ArrowRight, Eye, ShieldAlert, Check, X
 } from 'lucide-react';
+import { useAdminFeedback } from './ui/AdminFeedback';
 
 interface DeduplicationManagerProps {
   user: User | null;
 }
 
 export function DeduplicationManager({ user }: DeduplicationManagerProps) {
+  const { toast, confirm: confirmDialog } = useAdminFeedback();
   const [duplicateCases, setDuplicateCases] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [scanning, setScanning] = useState(false);
@@ -68,7 +70,7 @@ export function DeduplicationManager({ user }: DeduplicationManagerProps) {
 
   const handleSecureMerge = async (primaryId: number, secondaryId: number) => {
     if (!user) return;
-    if (!confirm('¿Estás seguro de realizar la Fusión Segura? El producto secundario se archivará conservando su trazabilidad histórica.')) return;
+    if (!(await confirmDialog({ title: '¿Realizar la fusión segura?', message: 'El producto secundario se archivará conservando su trazabilidad histórica.', confirmLabel: 'Fusionar', tone: 'primary' }))) return;
 
     try {
       const token = await user.getIdToken();
@@ -82,15 +84,15 @@ export function DeduplicationManager({ user }: DeduplicationManagerProps) {
       });
       const data = await res.json();
       if (res.ok) {
-        alert(data.message || 'Fusión completada con éxito.');
+        toast.success(data.message || 'Fusión completada con éxito.');
         setSelectedCase(null);
         fetchDuplicateCases();
       } else {
-        alert(data.error || 'Error al fusionar productos.');
+        toast.error(data.error || 'Error al fusionar productos.');
       }
     } catch (e) {
       console.error(e);
-      alert('Error de red al fusionar.');
+      toast.error('Error de red al fusionar.');
     }
   };
 

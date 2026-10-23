@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Settings, ShieldAlert, Zap, RefreshCw, CheckCircle2, Sliders, Database, HardDrive } from 'lucide-react';
+import { useAdminFeedback } from './ui/AdminFeedback';
 
 interface SettingsManagerProps {
   user: any;
 }
 
 export const SettingsManager: React.FC<SettingsManagerProps> = ({ user }) => {
+  const { toast, confirm: confirmDialog } = useAdminFeedback();
   const [settings, setSettings] = useState<any>({
     scraper: true,
     imports: true,
@@ -61,11 +63,11 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({ user }) => {
       if (res.ok) {
         setSaveMsg("Configuraciones del sistema guardadas exitosamente.");
       } else {
-        alert(data.error || "Error al guardar configuraciones");
+        toast.error(data.error || "Error al guardar configuraciones");
       }
     } catch (err) {
       console.error(err);
-      alert("Error de conexión al guardar configuración");
+      toast.error("Error de conexión al guardar configuración");
     } finally {
       setIsSaving(false);
     }

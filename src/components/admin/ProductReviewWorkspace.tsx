@@ -5,12 +5,14 @@ import {
   RefreshCw, FileText, Eye, Check, X, ShieldAlert, Sparkles, Filter, 
   Layers, Package, Tag, Globe, ArrowRight, Save, ArrowLeft, GitMerge, History, Image as ImageIcon
 } from 'lucide-react';
+import { useAdminFeedback } from './ui/AdminFeedback';
 
 interface ProductReviewWorkspaceProps {
   user: User | null;
 }
 
 export function ProductReviewWorkspace({ user }: ProductReviewWorkspaceProps) {
+  const { toast, confirm: confirmDialog } = useAdminFeedback();
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -112,7 +114,7 @@ export function ProductReviewWorkspace({ user }: ProductReviewWorkspaceProps) {
 
   const handleUpdateStatus = async (newStatus: string, notes?: string) => {
     if (!user || !selectedId) return;
-    if (!confirm(`¿Estás seguro de cambiar el estado a ${newStatus}?`)) return;
+    if (!(await confirmDialog({ title: `¿Cambiar el estado a ${newStatus}?`, confirmLabel: 'Cambiar estado', tone: newStatus === 'REJECTED' ? 'danger' : 'primary' }))) return;
     try {
       const token = await user.getIdToken();
       const res = await fetch(`/api/admin/review/products/${selectedId}/status`, {
@@ -125,11 +127,11 @@ export function ProductReviewWorkspace({ user }: ProductReviewWorkspaceProps) {
       });
       const data = await res.json();
       if (res.ok) {
-        alert(data.message || 'Estado actualizado.');
+        toast.success(data.message || 'Estado actualizado.');
         fetchProductDetail(selectedId);
         fetchProducts();
       } else {
-        alert(data.error || 'Error al actualizar estado.');
+        toast.error(data.error || 'Error al actualizar estado.');
       }
     } catch (e) {
       console.error(e);
