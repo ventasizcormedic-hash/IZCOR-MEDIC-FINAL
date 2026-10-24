@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx --watch server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs && esbuild scripts/set_user_role.ts --bundle --platform=node --format=cjs --packages=external --outfile=dist/set-role.cjs",
     "start": "node dist/server.cjs",
     "preview": "vite preview --host 0.0.0.0",
     "clean": "rm -rf dist server.js",
@@ -17,7 +17,8 @@
     "test:e2e:playwright:update": "playwright test --update-snapshots",
     "audit:catalog": "tsx scripts/audit_catalog.ts",
     "import-catalog": "tsx scripts/import_catalog_json.ts",
-    "set-role": "tsx scripts/set_user_role.ts"
+    "set-role": "tsx scripts/set_user_role.ts",
+    "set-role:prod": "node dist/set-role.cjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

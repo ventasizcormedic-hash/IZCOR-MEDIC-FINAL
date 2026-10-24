@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { createServer as createViteServer } from "vite";
 import { requireAuth, requireAdmin, resolveUserRole, ADMIN_ROLES, AuthRequest } from "./src/middleware/auth.ts";
 import { db, initDatabase } from "./src/db/index.ts";
-import { brands, categories, products, quoteItems, quotes, tdrRequests, pharmacovigilanceReports, productImages, productDocuments, sources, scraperUrls, scrapingJobs, draftProducts, duplicateCases, productMergeHistory, backgroundJobs, sourceCandidates, users, autonomousSettings, autonomousAuditLogs, productVersions } from "./src/db/schema.ts";
+import { brands, categories, products, quoteItems, quotes, tdrRequests, tdrFiles, pharmacovigilanceReports, productImages, productDocuments, sources, scraperUrls, scrapingJobs, draftProducts, duplicateCases, productMergeHistory, backgroundJobs, sourceCandidates, users, autonomousSettings, autonomousAuditLogs, productVersions } from "./src/db/schema.ts";
 import { eq, ilike, or, and, desc, asc, sql, inArray, gte, type SQL } from "drizzle-orm";
 import { getOrCreateUser } from "./src/db/users.ts";
 import { catalogConsolidationService } from "./src/services/catalogConsolidationService.ts";
@@ -41,17 +41,27 @@ const slugify = (value: string) =>
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/(^-|-$)+/g, '');
 
+const TDR_MAX_FILE_BYTES = 10 * 1024 * 1024;
+
+// Canonical public URL for robots/sitemap: APP_URL when set, else the request host.
+const publicBaseUrl = (req: express.Request) =>
+  (process.env.APP_URL || `${req.protocol}://${req.get("host")}`).replace(/\/+$/, '');
+
 async function startServer() {
   // Initialize database engine (PostgreSQL or PGlite) and auto-seed if required
   await initDatabase();
 
   // Boot high-performance indexes on database startup
-  initializeDatabaseIndexes().catch(err => console.warn("Index init note:", err?.message || err));
+  // Awaited: it also creates tables (tdr_files, pharmacovigilance_reports) the routes need.
+  await initializeDatabaseIndexes().catch(err => console.warn("Index init note:", err?.message || err));
 
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
 
   app.disable('x-powered-by');
+  // Behind a load balancer / Cloud Run: trust X-Forwarded-* for protocol and client IP.
+  app.set('trust proxy', 1);
+  const isProductionEnv = process.env.NODE_ENV === 'production';
 
   // Security headers for production
   app.use((req, res, next) => {
@@ -60,6 +70,9 @@ async function startServer() {
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     res.setHeader('X-XSS-Protection', '1; mode=block');
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    if (isProductionEnv && req.secure) {
+      res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    }
 
     if (req.path.startsWith('/api/')) {
       res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
@@ -74,7 +87,10 @@ async function startServer() {
 
   // Performance: HTTP Compression (Gzip / Deflate)
   app.use(compression());
-  app.use(express.json({ limit: '50mb' }));
+  // Admin bulk imports send large chunks; public endpoints get a tighter limit
+  // (a 10MB TDR file is ~13.4MB once base64-encoded).
+  app.use('/api/admin', express.json({ limit: '50mb' }));
+  app.use(express.json({ limit: '15mb' }));
 
   // Global Performance Telemetry Middleware
   app.use((req, res, next) => {
@@ -86,6 +102,32 @@ async function startServer() {
     next();
   });
 
+  // Simple in-memory rate limit for public form/AI endpoints (per client IP).
+  const rateLimit = (max: number, windowMs: number) => {
+    const hits = new Map<string, number[]>();
+    return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+      // baseUrl + path: under app.use(prefix) req.path alone loses the endpoint name.
+      const key = `${req.ip}|${req.baseUrl}${req.path}`;
+      const now = Date.now();
+      const recent = (hits.get(key) || []).filter(t => now - t < windowMs);
+      if (recent.length >= max) {
+        res.setHeader('Retry-After', String(Math.ceil((windowMs - (now - recent[0])) / 1000)));
+        return res.status(429).json({ error: "Demasiadas solicitudes seguidas. Espere unos minutos e intente nuevamente o escríbanos por WhatsApp." });
+      }
+      recent.push(now);
+      hits.set(key, recent);
+      if (hits.size > 5000) {
+        for (const [k, times] of hits) if (!times.some(t => now - t < windowMs)) hits.delete(k);
+      }
+      next();
+    };
+  };
+  // Generous enough for a hospital network sharing one public IP.
+  const formLimiter = rateLimit(20, 15 * 60 * 1000);
+  app.use(['/api/quotes', '/api/contact', '/api/tdr', '/api/pharmacovigilance'], (req, res, next) =>
+    req.method === 'POST' ? formLimiter(req, res, next) : next());
+  app.use('/api/ai/analyze-tdr', rateLimit(5, 15 * 60 * 1000));
+
   // API Routes
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
@@ -96,6 +138,8 @@ async function startServer() {
   if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
   }
+  // TDR documents are private client files: never serve them statically.
+  app.use('/uploads/tdr', (req, res) => res.status(404).end());
   app.use('/uploads', express.static(uploadsDir));
 
   // Checks that a URL answers (HEAD, falling back to GET) within a few seconds.
@@ -277,23 +321,20 @@ async function startServer() {
       }
 
       const rawBase64 = fileBase64 || fileData || null;
-      let storedFileUrl: string | null = null;
+      let fileContent: Buffer | null = null;
+      let safeName: string | null = null;
       if (rawBase64 && fileName) {
-        // Uploads land in a public folder: only accept the document types the form offers.
+        // Only accept the document types the form offers.
         const ext = path.extname(String(fileName)).toLowerCase();
         if (!['.pdf', '.docx', '.xlsx'].includes(ext)) {
           return res.status(400).json({ error: "Formato de archivo no permitido. Solo PDF, DOCX o XLSX." });
         }
-        const tdrUploadDir = path.resolve(projectRoot, 'public', 'uploads', 'tdr');
-        if (!fs.existsSync(tdrUploadDir)) {
-          fs.mkdirSync(tdrUploadDir, { recursive: true });
+        const base64Content = String(rawBase64).includes('base64,') ? String(rawBase64).split('base64,')[1] : String(rawBase64);
+        fileContent = Buffer.from(base64Content, 'base64');
+        if (fileContent.length > TDR_MAX_FILE_BYTES) {
+          return res.status(413).json({ error: "El archivo excede el límite de 10MB." });
         }
-        const safeName = `${Date.now()}_${path.basename(fileName).replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-        const filePath = path.join(tdrUploadDir, safeName);
-        
-        const base64Content = rawBase64.includes('base64,') ? rawBase64.split('base64,')[1] : rawBase64;
-        fs.writeFileSync(filePath, Buffer.from(base64Content, 'base64'));
-        storedFileUrl = `/uploads/tdr/${safeName}`;
+        safeName = path.basename(String(fileName)).replace(/[^a-zA-Z0-9._-]/g, '_');
       }
 
       const tdrResult = await db.insert(tdrRequests).values({
@@ -302,11 +343,25 @@ async function startServer() {
         email: String(email).trim(),
         phone: String(phone).trim(),
         description: description ? String(description).trim() : null,
-        fileUrl: storedFileUrl,
+        fileUrl: null,
         status: 'NEW',
       }).returning();
 
       const createdTdr = tdrResult[0];
+
+      // Stored privately in the database; only admins can download it.
+      let storedFileUrl: string | null = null;
+      if (fileContent && safeName) {
+        await db.insert(tdrFiles).values({
+          tdrId: createdTdr.id,
+          fileName: safeName,
+          mimeType: fileType ? String(fileType).slice(0, 150) : null,
+          size: fileContent.length,
+          dataBase64: fileContent.toString('base64'),
+        });
+        storedFileUrl = `/api/admin/tdr/${createdTdr.id}/file`;
+        await db.update(tdrRequests).set({ fileUrl: storedFileUrl }).where(eq(tdrRequests.id, createdTdr.id));
+      }
       const tdrCode = `TDR-${String(createdTdr.id).padStart(5, '0')}`;
 
       res.status(201).json({
@@ -314,7 +369,6 @@ async function startServer() {
         tdrId: tdrCode,
         id: createdTdr.id,
         expedienteCode: tdrCode,
-        fileUrl: storedFileUrl,
         message: "Expediente TDR recibido exitosamente. Nuestro equipo biomédico revisará las especificaciones en menos de 24 horas."
       });
     } catch (e: any) {
@@ -331,6 +385,30 @@ async function startServer() {
     } catch (e: any) {
       console.error("Error fetching admin TDR:", e);
       res.status(500).json({ error: "Failed to fetch TDR requests" });
+    }
+  });
+
+  // Admin: Download a TDR document (private; protected by the /api/admin guard)
+  app.get("/api/admin/tdr/:id/file", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return res.status(400).json({ error: "ID inválido" });
+      const [file] = await db.select().from(tdrFiles).where(eq(tdrFiles.tdrId, id)).orderBy(desc(tdrFiles.id)).limit(1);
+      if (file) {
+        res.setHeader('Content-Type', file.mimeType || 'application/octet-stream');
+        res.setHeader('Content-Disposition', `attachment; filename="${file.fileName}"`);
+        return res.send(Buffer.from(file.dataBase64, 'base64'));
+      }
+      // Requests saved before files moved to the database kept them in public/uploads/tdr.
+      const [request] = await db.select().from(tdrRequests).where(eq(tdrRequests.id, id)).limit(1);
+      if (request?.fileUrl?.startsWith('/uploads/tdr/')) {
+        const legacyPath = path.join(projectRoot, 'public', 'uploads', 'tdr', path.basename(request.fileUrl));
+        if (fs.existsSync(legacyPath)) return res.download(legacyPath);
+      }
+      res.status(404).json({ error: "Archivo no encontrado" });
+    } catch (e: any) {
+      console.error("Error downloading TDR file:", e);
+      res.status(500).json({ error: "No se pudo descargar el archivo." });
     }
   });
 
@@ -524,7 +602,7 @@ async function startServer() {
 
   // SEO: robots.txt
   app.get("/robots.txt", (req, res) => {
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
+    const baseUrl = publicBaseUrl(req);
     res.type("text/plain");
     res.send(`User-agent: *
 Allow: /
@@ -540,7 +618,7 @@ Sitemap: ${baseUrl}/sitemap.xml`);
 
   // SEO: Sitemap Index
   app.get("/sitemap.xml", (req, res) => {
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
+    const baseUrl = publicBaseUrl(req);
     res.type("application/xml");
     res.send(`<?xml version="1.0" encoding="UTF-8"?>
 <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
@@ -554,7 +632,7 @@ Sitemap: ${baseUrl}/sitemap.xml`);
   // SEO: Products Sitemap
   app.get("/sitemaps/products.xml", async (req, res) => {
     try {
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const baseUrl = publicBaseUrl(req);
       // For massive catalogs, this should be paginated (e.g. products-1.xml), but for <50k a single file is valid.
       // Max 50,000 URLs per sitemap. We'll fetch the most recent published products.
       const publishedProducts = await db
@@ -587,7 +665,7 @@ ${urls}
   // SEO: Categories Sitemap
   app.get("/sitemaps/categories.xml", async (req, res) => {
     try {
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const baseUrl = publicBaseUrl(req);
       const activeCategories = await db.select({ slug: categories.slug }).from(categories);
 
       const urls = activeCategories.map(c => `  <url>
@@ -610,7 +688,7 @@ ${urls}
   // SEO: Brands Sitemap
   app.get("/sitemaps/brands.xml", async (req, res) => {
     try {
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const baseUrl = publicBaseUrl(req);
       const activeBrands = await db.select({ slug: brands.slug }).from(brands);
 
       const urls = activeBrands.map(b => `  <url>
@@ -633,7 +711,7 @@ ${urls}
   // SEO: Manufacturers Sitemap
   app.get("/sitemaps/manufacturers.xml", async (req, res) => {
     try {
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const baseUrl = publicBaseUrl(req);
       const uniqueMfgs = await db
         .select({ manufacturer: products.manufacturer })
         .from(products)
@@ -3025,7 +3103,6 @@ ${urls}
     }
   });
 
-  app.use(express.json({ limit: '50mb' })); // Allow large payloads for bulk import
 
   app.post("/api/admin/products/bulk", requireAuth, async (req: AuthRequest, res) => {
     try {
@@ -4654,6 +4731,25 @@ ${urls}
     } catch (e: any) {
       res.status(500).json({ error: e.message || "Failed to activate safe start" });
     }
+  });
+
+  // Unknown API routes answer JSON 404 instead of the SPA's index.html.
+  app.use('/api', (req, res) => {
+    res.status(404).json({ error: "Ruta de API no encontrada" });
+  });
+
+  // Errors (including invalid/oversized JSON bodies) answer JSON on the API.
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (res.headersSent) return next(err);
+    const status = err?.status || err?.statusCode || 500;
+    if (status >= 500) console.error('Unhandled error:', err);
+    if (req.path.startsWith('/api')) {
+      const message = status === 413 ? 'El contenido enviado es demasiado grande.'
+        : status === 400 ? 'Solicitud inválida.'
+        : 'Error interno del servidor.';
+      return res.status(status).json({ error: message });
+    }
+    res.status(status).send('Error');
   });
 
   const isProduction = process.env.NODE_ENV === "production" || process.argv[1]?.endsWith("dist/server.cjs") || process.argv[1]?.includes("\\dist\\server.cjs");

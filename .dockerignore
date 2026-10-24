@@ -1,0 +1,15 @@
+node_modules
+dist
+.data
+.git
+.env
+.env.*
+!.env.example
+e2e
+tests
+playwright-report
+test-results
+public/uploads/*
+!public/uploads/.gitkeep
+CATALOGOS LISTA DE PRODUCTOS EN  ECXEL
+*.log

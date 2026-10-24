@@ -4,6 +4,16 @@ import { sql } from 'drizzle-orm';
 export async function initializeDatabaseIndexes(): Promise<void> {
   try {
     const statements = [
+      `CREATE TABLE IF NOT EXISTS tdr_files (
+        id SERIAL PRIMARY KEY,
+        tdr_id INTEGER REFERENCES tdr_requests(id),
+        file_name VARCHAR(255) NOT NULL,
+        mime_type VARCHAR(150),
+        size INTEGER NOT NULL,
+        data_base64 TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );`,
+      `CREATE INDEX IF NOT EXISTS idx_tdr_files_tdr_id ON tdr_files(tdr_id);`,
       `CREATE TABLE IF NOT EXISTS pharmacovigilance_reports (
         id SERIAL PRIMARY KEY,
         report_code VARCHAR(50) NOT NULL,

@@ -189,6 +189,34 @@ export function RequestsInboxManager({ user }: { user: any }) {
     }
   };
 
+  // TDR files are behind admin auth, so download with the token instead of a plain link.
+  const [downloadingId, setDownloadingId] = useState<number | null>(null);
+  const downloadTdrFile = async (row: TdrRequest) => {
+    if (!row.fileUrl) return;
+    setDownloadingId(row.id);
+    try {
+      const token = await user.getIdToken();
+      const url = row.fileUrl.startsWith('/api/') ? row.fileUrl : `/api/admin/tdr/${row.id}/file`;
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error(res.status === 404 ? 'El archivo ya no está disponible.' : `Error ${res.status}`);
+      const blob = await res.blob();
+      const disposition = res.headers.get('Content-Disposition') || '';
+      const fileName = disposition.match(/filename="([^"]+)"/)?.[1] || `TDR-${String(row.id).padStart(5, '0')}`;
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    } catch (e: any) {
+      toast.error(e.message || 'No se pudo descargar el documento.');
+    } finally {
+      setDownloadingId(null);
+    }
+  };
+
   const tabs: Array<{ id: InboxKind; label: string; icon: React.ElementType }> = [
     { id: 'quotes', label: 'Cotizaciones', icon: FileText },
     { id: 'contact', label: 'Mensajes de contacto', icon: MessageSquare },
@@ -362,9 +390,14 @@ export function RequestsInboxManager({ user }: { user: any }) {
                         <div className="flex items-center gap-1 text-gray-600"><Building2 className="w-3.5 h-3.5" /> {row.institution}</div>
                         {row.description && <p className="whitespace-pre-line bg-gray-50 rounded-lg p-3 border border-gray-100">{row.description}</p>}
                         {row.fileUrl ? (
-                          <a href={row.fileUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold">
-                            <Download className="w-3.5 h-3.5" /> Descargar documento TDR
-                          </a>
+                          <button
+                            type="button"
+                            onClick={() => downloadTdrFile(row)}
+                            disabled={downloadingId === row.id}
+                            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold disabled:opacity-60"
+                          >
+                            <Download className="w-3.5 h-3.5" /> {downloadingId === row.id ? 'Descargando...' : 'Descargar documento TDR'}
+                          </button>
                         ) : (
                           <span className="text-gray-400">Sin archivo adjunto.</span>
                         )}

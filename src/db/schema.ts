@@ -131,6 +131,18 @@ export const tdrRequests = pgTable('tdr_requests', {
   createdAt: timestamp('created_at').defaultNow(),
 });
 
+// TDR documents live in the database (not on disk): containers have ephemeral
+// disks, and these client files must only be downloadable by admins.
+export const tdrFiles = pgTable('tdr_files', {
+  id: serial('id').primaryKey(),
+  tdrId: integer('tdr_id').references(() => tdrRequests.id),
+  fileName: varchar('file_name', { length: 255 }).notNull(),
+  mimeType: varchar('mime_type', { length: 150 }),
+  size: integer('size').notNull(),
+  dataBase64: text('data_base64').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
 export const pharmacovigilanceReports = pgTable('pharmacovigilance_reports', {
   id: serial('id').primaryKey(),
   reportCode: varchar('report_code', { length: 50 }).notNull(),
