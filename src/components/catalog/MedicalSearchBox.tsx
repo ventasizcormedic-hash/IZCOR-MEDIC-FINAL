@@ -206,7 +206,7 @@ export const MedicalSearchBox: React.FC<MedicalSearchBoxProps> = ({
   return (
     <div ref={containerRef} className={`relative w-full ${className}`}>
       <form onSubmit={handleFormSubmit} className="relative">
-        <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-400">
+        <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-400 z-10">
           <Search className="w-4 h-4" />
         </div>
         <input

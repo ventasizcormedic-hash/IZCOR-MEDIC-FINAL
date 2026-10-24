@@ -198,7 +198,7 @@ export function Header() {
                 <Logo className="h-9 md:h-11" />
               </Link>
 
-              <div className="header-brand-shell hidden sm:flex items-center rounded-full px-3 py-1.5">
+              <div className="header-brand-shell hidden sm:flex xl:hidden items-center rounded-full px-3 py-1.5">
                 <div className="brand-lockup-mark text-left">
                   <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[#20384D]">IZCOR MEDIC</p>
                   <p className="text-[9px] font-semibold tracking-[0.14em] uppercase text-slate-500">Instituciones de salud</p>
@@ -216,7 +216,7 @@ export function Header() {
               <Link
                 to="/"
                 id="nav-link-inicio"
-                className={`px-3.5 py-2 rounded-xl text-[11px] sm:text-xs font-black tracking-[0.14em] uppercase transition-all duration-200 relative ${
+                className={`px-2.5 py-2 rounded-xl text-[11px] sm:text-xs font-black tracking-[0.1em] uppercase transition-all duration-200 relative ${
                   isHomeActive 
                     ? 'text-[#2C3E50] bg-slate-100/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]' 
                     : 'text-[#2C3E50]/75 hover:text-cyan-700 hover:bg-slate-50'
@@ -224,7 +224,7 @@ export function Header() {
               >
                 <span>Inicio</span>
                 {isHomeActive && (
-                  <span className="absolute bottom-1 left-3.5 right-3.5 h-0.5 bg-brand-cyan rounded-full" />
+                  <span className="absolute bottom-1 left-2.5 right-2.5 h-0.5 bg-brand-cyan rounded-full" />
                 )}
               </Link>
 
@@ -232,7 +232,7 @@ export function Header() {
               <Link
                 to="/nosotros"
                 id="nav-link-nosotros"
-                className={`px-3.5 py-2 rounded-xl text-[11px] sm:text-xs font-black tracking-[0.14em] uppercase transition-all duration-200 relative ${
+                className={`px-2.5 py-2 rounded-xl text-[11px] sm:text-xs font-black tracking-[0.1em] uppercase transition-all duration-200 relative ${
                   isAboutActive 
                     ? 'text-[#2C3E50] bg-slate-100/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]' 
                     : 'text-[#2C3E50]/75 hover:text-cyan-700 hover:bg-slate-50'
@@ -240,7 +240,7 @@ export function Header() {
               >
                 <span>Nosotros</span>
                 {isAboutActive && (
-                  <span className="absolute bottom-1 left-3.5 right-3.5 h-0.5 bg-brand-cyan rounded-full" />
+                  <span className="absolute bottom-1 left-2.5 right-2.5 h-0.5 bg-brand-cyan rounded-full" />
                 )}
               </Link>
 
@@ -253,7 +253,7 @@ export function Header() {
                 <Link
                   to="/productos"
                   id="nav-link-catalogo"
-                  className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[11px] sm:text-xs font-black tracking-[0.14em] uppercase transition-all duration-200 relative ${
+                  className={`inline-flex items-center gap-1 px-2.5 py-2 rounded-xl text-[11px] sm:text-xs font-black tracking-[0.1em] uppercase transition-all duration-200 relative ${
                     isCatalogActive 
                       ? 'text-[#2C3E50] bg-slate-100/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]' 
                       : 'text-[#2C3E50]/75 hover:text-cyan-700 hover:bg-slate-50'
@@ -265,7 +265,7 @@ export function Header() {
                   <span>Catálogo</span>
                   <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${catalogMenuOpen ? 'rotate-180 text-cyan-700' : 'text-slate-400'}`} />
                   {isCatalogActive && (
-                    <span className="absolute bottom-1 left-3.5 right-3.5 h-0.5 bg-brand-cyan rounded-full" />
+                    <span className="absolute bottom-1 left-2.5 right-2.5 h-0.5 bg-brand-cyan rounded-full" />
                   )}
                 </Link>
 
@@ -284,7 +284,7 @@ export function Header() {
                 <Link
                   to="/marcas"
                   id="nav-link-marcas"
-                  className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[11px] sm:text-xs font-black tracking-[0.14em] uppercase transition-all duration-200 relative ${
+                  className={`inline-flex items-center gap-1 px-2.5 py-2 rounded-xl text-[11px] sm:text-xs font-black tracking-[0.1em] uppercase transition-all duration-200 relative ${
                     isBrandsActive
                       ? 'text-[#2C3E50] bg-slate-100/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]'
                       : 'text-[#2C3E50]/75 hover:text-cyan-700 hover:bg-slate-50'
@@ -295,7 +295,7 @@ export function Header() {
                   <span>Marcas</span>
                   <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${mfgMenuOpen ? 'rotate-180 text-cyan-700' : 'text-slate-400'}`} />
                   {isBrandsActive && (
-                    <span className="absolute bottom-1 left-3.5 right-3.5 h-0.5 bg-brand-cyan rounded-full" />
+                    <span className="absolute bottom-1 left-2.5 right-2.5 h-0.5 bg-brand-cyan rounded-full" />
                   )}
                 </Link>
 
@@ -309,7 +309,7 @@ export function Header() {
               <Link
                 to="/noticias"
                 id="nav-link-noticias"
-                className={`px-3.5 py-2 rounded-xl text-[11px] sm:text-xs font-black tracking-[0.14em] uppercase transition-all duration-200 relative ${
+                className={`px-2.5 py-2 rounded-xl text-[11px] sm:text-xs font-black tracking-[0.1em] uppercase transition-all duration-200 relative ${
                   isNewsActive 
                     ? 'text-[#2C3E50] bg-slate-100/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]' 
                     : 'text-[#2C3E50]/75 hover:text-cyan-700 hover:bg-slate-50'
@@ -317,7 +317,7 @@ export function Header() {
               >
                 <span>Noticias</span>
                 {isNewsActive && (
-                  <span className="absolute bottom-1 left-3.5 right-3.5 h-0.5 bg-brand-cyan rounded-full" />
+                  <span className="absolute bottom-1 left-2.5 right-2.5 h-0.5 bg-brand-cyan rounded-full" />
                 )}
               </Link>
 
@@ -325,7 +325,7 @@ export function Header() {
               <Link
                 to="/contacto"
                 id="nav-link-contacto"
-                className={`px-3.5 py-2 rounded-xl text-[11px] sm:text-xs font-black tracking-[0.14em] uppercase transition-all duration-200 relative ${
+                className={`px-2.5 py-2 rounded-xl text-[11px] sm:text-xs font-black tracking-[0.1em] uppercase transition-all duration-200 relative ${
                   isContactActive 
                     ? 'text-[#2C3E50] bg-slate-100/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]' 
                     : 'text-[#2C3E50]/75 hover:text-cyan-700 hover:bg-slate-50'
@@ -333,7 +333,7 @@ export function Header() {
               >
                 <span>Contáctanos</span>
                 {isContactActive && (
-                  <span className="absolute bottom-1 left-3.5 right-3.5 h-0.5 bg-brand-cyan rounded-full" />
+                  <span className="absolute bottom-1 left-2.5 right-2.5 h-0.5 bg-brand-cyan rounded-full" />
                 )}
               </Link>
             </nav>
@@ -351,8 +351,8 @@ export function Header() {
                 aria-label="Abrir buscador"
               >
                 <Search className="w-3.5 h-3.5 text-slate-500" />
-                <span className="hidden xl:inline text-slate-500 font-sans">Buscar equipos o insumos...</span>
-                <kbd className="hidden lg:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono text-slate-400 bg-white border border-slate-200 rounded-full">
+                <span className="sr-only">Buscar equipos o insumos</span>
+                <kbd className="hidden lg:inline-flex items-center whitespace-nowrap px-1.5 py-0.5 text-[10px] font-mono text-slate-400 bg-white border border-slate-200 rounded-full">
                   {shortcutLabel}
                 </kbd>
               </button>
