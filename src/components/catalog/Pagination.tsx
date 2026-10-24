@@ -70,6 +70,7 @@ export function Pagination({
           <div className="hidden md:flex items-center gap-1.5 pl-3 border-l border-slate-200">
             <span className="text-slate-500">Por página:</span>
             <select
+              aria-label="Productos por página"
               value={itemsPerPage}
               onChange={(e) => onItemsPerPageChange(Number(e.target.value))}
               className="bg-slate-50 border border-slate-200 text-slate-700 text-xs font-semibold rounded-md px-2 py-1 focus:outline-none focus:border-brand-navy"

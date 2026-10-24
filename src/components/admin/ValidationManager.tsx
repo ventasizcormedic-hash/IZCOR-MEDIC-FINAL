@@ -7,6 +7,7 @@ import {
   Filter, Check, X, AlertOctagon, Wrench, ArrowRight,
   Layers, ChevronDown, CheckCheck
 } from 'lucide-react';
+import { useAdminFeedback } from './ui/AdminFeedback';
 
 interface ValidationManagerProps {
   user: User | null;
@@ -24,6 +25,7 @@ export type IncidentCategoryFilter =
   | 'HAS_ERRORS';
 
 export function ValidationManager({ user }: ValidationManagerProps) {
+  const { toast, confirm: confirmDialog } = useAdminFeedback();
   // State
   const [loading, setLoading] = useState(false);
   const [scanning, setScanning] = useState(false);
@@ -79,13 +81,22 @@ export function ValidationManager({ user }: ValidationManagerProps) {
     }
   };
 
+  // Bumped by "Limpiar filtros" so the list reloads even when only the search text was set.
+  const [reloadToken, setReloadToken] = useState(0);
   useEffect(() => {
     fetchQualityAudit();
-  }, [user, selectedCategory, selectedSeverity, selectedStatus]);
+  }, [user, selectedCategory, selectedSeverity, selectedStatus, reloadToken]);
 
   // Run full catalog scan
   const handleRunFullScan = async () => {
     if (!user) return;
+    const ok = await confirmDialog({
+      title: '¿Ejecutar el escaneo completo de calidad?',
+      message: 'Se revisará todo el catálogo. Los productos con incidencias pueden pasar de VERIFICADO a REVISIÓN.',
+      confirmLabel: 'Ejecutar escaneo',
+      tone: 'primary',
+    });
+    if (!ok) return;
     setScanning(true);
     setActionFeedback({ message: 'Iniciando escaneo automático de las 8 incidencias de calidad...', type: 'info' });
     try {
@@ -150,10 +161,10 @@ export function ValidationManager({ user }: ValidationManagerProps) {
         setSelectedProduct(null);
         fetchQualityAudit();
       } else {
-        alert(data.error || 'Error al guardar corrección.');
+        toast.error(data.error || 'Error al guardar corrección.');
       }
     } catch (e: any) {
-      alert(`Error de comunicación: ${e.message}`);
+      toast.error(`Error de comunicación: ${e.message}`);
     } finally {
       setSavingFix(false);
     }
@@ -162,6 +173,13 @@ export function ValidationManager({ user }: ValidationManagerProps) {
   // Quick verify
   const handleQuickVerify = async (productId: number) => {
     if (!user) return;
+    const ok = await confirmDialog({
+      title: '¿Aprobar y verificar este producto?',
+      message: 'Quedará marcado como VERIFICADO aunque tenga incidencias abiertas.',
+      confirmLabel: 'Verificar',
+      tone: 'primary',
+    });
+    if (!ok) return;
     try {
       const token = await user.getIdToken();
       const res = await fetch(`/api/admin/validation/${productId}/verify`, {
@@ -175,6 +193,8 @@ export function ValidationManager({ user }: ValidationManagerProps) {
           setSelectedProduct(null);
         }
         fetchQualityAudit();
+      } else {
+        setActionFeedback({ message: data.error || 'No se pudo verificar el producto.', type: 'error' });
       }
     } catch (e) {
       console.error(e);
@@ -192,18 +212,21 @@ export function ValidationManager({ user }: ValidationManagerProps) {
       `"${(r.manufacturer || r.brandName || 'N/D').replace(/"/g, '""')}"`,
       r.validationScore,
       r.verificationStatus,
-      `"${r.incidents.map((i: any) => i.title).join('; ')}"`,
+      `"${r.incidents.map((i: any) => i.title).join('; ').replace(/"/g, '""')}"`,
       `"${r.sourceUrl || ''}"`
     ]);
 
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
+    // Blob + UTF-8 BOM: Excel shows accents correctly and '#' no longer truncates the file.
+    const csvContent = [headers.join(','), ...rows.map(e => e.join(','))].join('\r\n');
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `control_calidad_izcor_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.href = url;
+    link.download = `control_calidad_izcor_${new Date().toISOString().slice(0, 10)}.csv`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   const breakdown = summary?.breakdown || {
@@ -552,6 +575,7 @@ export function ValidationManager({ user }: ValidationManagerProps) {
                 setSelectedSeverity('ALL');
                 setSelectedStatus('ALL');
                 setSearchQuery('');
+                setReloadToken(t => t + 1);
               }}
               className="px-3 py-2 text-xs font-bold text-indigo-600 hover:text-indigo-800 transition-colors"
             >
@@ -754,6 +778,8 @@ export function ValidationManager({ user }: ValidationManagerProps) {
                 </div>
               </div>
               <button 
+                type="button"
+                aria-label="Cerrar"
                 onClick={() => setSelectedProduct(null)} 
                 className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/10 transition-colors"
               >

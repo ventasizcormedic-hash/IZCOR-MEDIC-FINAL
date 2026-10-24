@@ -84,7 +84,7 @@ export class ValidationService {
     }
 
     // Layer 7: Outdated Check (> 90 days without check)
-    const lastCheck = product.lastValidatedAt ? new Date(product.lastValidatedAt) : (product.updatedAt ? new Date(product.updatedAt) : new Date(product.createdAt));
+    const lastCheck = product.lastValidatedAt ? new Date(product.lastValidatedAt) : (product.updatedAt ? new Date(product.updatedAt) : new Date(product.createdAt ?? Date.now()));
     const daysSince = (Date.now() - lastCheck.getTime()) / (1000 * 60 * 60 * 24);
     if (product.verificationStatus === 'OUTDATED' || daysSince > 90) {
       issues.push({ field: 'outdated', severity: 'LOW', message: `Registro desactualizado (sin revisión en ${Math.round(daysSince)} días).` });

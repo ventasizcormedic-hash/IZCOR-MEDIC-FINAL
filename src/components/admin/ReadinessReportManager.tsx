@@ -5,6 +5,7 @@ import {
   ImageIcon, Activity, Zap, Check, ChevronRight, Sliders, Info, Server,
   Lock, ArrowUpRight, Gauge
 } from 'lucide-react';
+import { useAdminFeedback } from './ui/AdminFeedback';
 
 interface ReadinessReportProps {
   user: any;
@@ -15,6 +16,7 @@ export const ReadinessReportManager: React.FC<ReadinessReportProps> = ({
   user,
   onNavigateToTab,
 }) => {
+  const { toast, confirm: confirmDialog } = useAdminFeedback();
   const [report, setReport] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isRunningCheck, setIsRunningCheck] = useState(false);
@@ -57,9 +59,13 @@ export const ReadinessReportManager: React.FC<ReadinessReportProps> = ({
       });
       if (res.ok) {
         await fetchReport();
+        toast.success('Verificación completada.');
+      } else {
+        toast.error('No se pudo ejecutar la verificación.');
       }
     } catch (err) {
       console.error(err);
+      toast.error('Error de conexión al ejecutar la verificación.');
     } finally {
       setIsRunningCheck(false);
     }
@@ -82,9 +88,12 @@ export const ReadinessReportManager: React.FC<ReadinessReportProps> = ({
       const data = await res.json();
       if (res.ok && data.success) {
         setDryRunResult(data.data);
+      } else {
+        toast.error(data.error || 'No se pudo ejecutar la simulación.');
       }
     } catch (err) {
       console.error(err);
+      toast.error('Error de conexión al ejecutar la simulación.');
     } finally {
       setIsDryRunning(false);
     }
@@ -92,7 +101,7 @@ export const ReadinessReportManager: React.FC<ReadinessReportProps> = ({
 
   const handleSafeStart = async () => {
     if (!user) return;
-    if (!window.confirm("¿Confirmas activar el modo SAFE START para ingesta de productos reales con lotes pequeños y Quality Gate estricto?")) {
+    if (!(await confirmDialog({ title: '¿Activar el modo SAFE START?', message: 'La ingesta de productos reales usará lotes pequeños y un Quality Gate estricto.', confirmLabel: 'Activar', tone: 'primary' }))) {
       return;
     }
     setIsActivatingSafeStart(true);
@@ -106,10 +115,14 @@ export const ReadinessReportManager: React.FC<ReadinessReportProps> = ({
       const data = await res.json();
       if (res.ok && data.success) {
         setSafeStartSuccessMsg(data.message);
+        toast.success(data.message || 'SAFE START activado.');
         await fetchReport();
+      } else {
+        toast.error(data.error || 'No se pudo activar SAFE START.');
       }
     } catch (err) {
       console.error(err);
+      toast.error('Error de conexión al activar SAFE START.');
     } finally {
       setIsActivatingSafeStart(false);
     }
@@ -132,7 +145,7 @@ export const ReadinessReportManager: React.FC<ReadinessReportProps> = ({
                   : 'bg-red-500/20 text-red-400 border border-red-500/40'
               }`}>
                 <ShieldCheck className="w-4 h-4" />
-                PRODUCTION READINESS: {report?.overallStatus || 'READY'}
+                PRODUCTION READINESS: {report?.overallStatus || 'SIN EVALUAR'}
               </span>
 
               <span className="text-xs text-slate-400 font-mono">

@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
+import { useModalBehavior } from '../hooks/useModalBehavior';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -107,6 +108,8 @@ const articles: Article[] = [
 export function News() {
   const [filter, setFilter] = useState('Todos');
   const [selectedArticle, setSelectedArticle] = useState<Article | null>(null);
+  const articleModalRef = useRef<HTMLDivElement>(null);
+  useModalBehavior(Boolean(selectedArticle), () => setSelectedArticle(null), articleModalRef);
   const categories = ['Todos', 'Compromiso Social', 'Educación', 'Eventos', 'Regulación'];
 
   const filteredArticles = filter === 'Todos' 
@@ -226,6 +229,7 @@ export function News() {
               onClick={() => setSelectedArticle(null)}
             >
               <motion.div
+                ref={articleModalRef}
                 initial={{ opacity: 0, scale: 0.95, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: 20 }}

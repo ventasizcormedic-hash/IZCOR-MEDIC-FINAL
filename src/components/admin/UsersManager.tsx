@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Users, Shield, UserCheck, RefreshCw, Check, X, ShieldAlert, Key } from 'lucide-react';
+import { useAdminFeedback } from './ui/AdminFeedback';
 
 interface UserRecord {
   id: number;
@@ -24,6 +25,7 @@ const PERMISSIONS_MATRIX: Record<string, string[]> = {
 };
 
 export const UsersManager: React.FC<UsersManagerProps> = ({ user }) => {
+  const { toast, confirm: confirmDialog } = useAdminFeedback();
   const [usersList, setUsersList] = useState<UserRecord[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [updatingId, setUpdatingId] = useState<number | null>(null);
@@ -37,11 +39,11 @@ export const UsersManager: React.FC<UsersManagerProps> = ({ user }) => {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
-      if (res.ok && Array.isArray(data)) {
-        setUsersList(data);
-      }
+      if (!res.ok || !Array.isArray(data)) throw new Error(data?.error || `HTTP ${res.status}`);
+      setUsersList(data);
     } catch (err) {
       console.error(err);
+      toast.error('No se pudo cargar la lista de usuarios.');
     } finally {
       setIsLoading(false);
     }
@@ -53,6 +55,14 @@ export const UsersManager: React.FC<UsersManagerProps> = ({ user }) => {
 
   const handleRoleChange = async (userId: number, newRole: string) => {
     if (!user) return;
+    const target = usersList.find(u => u.id === userId);
+    const ok = await confirmDialog({
+      title: `¿Cambiar el rol de ${target?.email || 'este usuario'}?`,
+      message: `Pasará de ${target?.role || 'USER'} a ${newRole}. ${['ADMIN', 'SUPER_ADMIN'].includes(newRole) ? 'Tendrá acceso completo al panel administrativo.' : ''}`,
+      confirmLabel: 'Cambiar rol',
+      tone: ['ADMIN', 'SUPER_ADMIN'].includes(newRole) ? 'primary' : 'danger',
+    });
+    if (!ok) return;
     setUpdatingId(userId);
     try {
       const token = await user.getIdToken();
@@ -66,11 +76,14 @@ export const UsersManager: React.FC<UsersManagerProps> = ({ user }) => {
       });
       if (res.ok) {
         setUsersList(prev => prev.map(u => u.id === userId ? { ...u, role: newRole } : u));
+        toast.success(`Rol actualizado a ${newRole}.`);
       } else {
-        alert("Error al actualizar rol");
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || "Error al actualizar rol");
       }
     } catch (err) {
       console.error(err);
+      toast.error('Error de conexión al actualizar el rol.');
     } finally {
       setUpdatingId(null);
     }
@@ -96,8 +109,8 @@ export const UsersManager: React.FC<UsersManagerProps> = ({ user }) => {
       </div>
 
       {/* Lista de Usuarios */}
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-        <table className="w-full text-left border-collapse text-xs">
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
+        <table className="w-full min-w-[640px] text-left border-collapse text-xs">
           <thead>
             <tr className="bg-gray-50/80 border-b border-gray-200 text-[11px] font-bold text-gray-500 uppercase tracking-wider">
               <th className="p-3.5">Usuario / Correo</th>
@@ -153,7 +166,9 @@ export const UsersManager: React.FC<UsersManagerProps> = ({ user }) => {
                   </td>
                   <td className="p-3.5 text-right">
                     <select
-                      disabled={updatingId === u.id}
+                      aria-label={`Rol de ${u.email}`}
+                      disabled={updatingId === u.id || u.uid === user?.uid}
+                      title={u.uid === user?.uid ? 'No puede cambiar su propio rol' : undefined}
                       value={u.role || 'USER'}
                       onChange={(e) => handleRoleChange(u.id, e.target.value)}
                       className="px-2.5 py-1 border border-gray-300 rounded-md text-xs font-semibold focus:ring-2 focus:ring-blue-500"

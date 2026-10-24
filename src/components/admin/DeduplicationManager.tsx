@@ -4,12 +4,14 @@ import {
   ShieldCheck, AlertTriangle, GitMerge, CheckCircle, XCircle, 
   Search, RefreshCw, Layers, ExternalLink, ArrowRight, Eye, ShieldAlert, Check, X
 } from 'lucide-react';
+import { useAdminFeedback } from './ui/AdminFeedback';
 
 interface DeduplicationManagerProps {
   user: User | null;
 }
 
 export function DeduplicationManager({ user }: DeduplicationManagerProps) {
+  const { toast, confirm: confirmDialog } = useAdminFeedback();
   const [duplicateCases, setDuplicateCases] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [scanning, setScanning] = useState(false);
@@ -26,16 +28,17 @@ export function DeduplicationManager({ user }: DeduplicationManagerProps) {
       const res = await fetch('/api/admin/duplicates', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      if (res.ok) {
-        const data = await res.json();
-        setDuplicateCases(data);
-      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setDuplicateCases(await res.json());
     } catch (e) {
       console.error(e);
+      toast.error('No se pudieron cargar los casos de duplicados.');
     } finally {
       setLoading(false);
     }
   };
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     fetchDuplicateCases();
@@ -68,8 +71,10 @@ export function DeduplicationManager({ user }: DeduplicationManagerProps) {
 
   const handleSecureMerge = async (primaryId: number, secondaryId: number) => {
     if (!user) return;
-    if (!confirm('¿Estás seguro de realizar la Fusión Segura? El producto secundario se archivará conservando su trazabilidad histórica.')) return;
+    if (isSubmitting) return;
+    if (!(await confirmDialog({ title: '¿Realizar la fusión segura?', message: 'El producto secundario se archivará conservando su trazabilidad histórica.', confirmLabel: 'Fusionar', tone: 'primary' }))) return;
 
+    setIsSubmitting(true);
     try {
       const token = await user.getIdToken();
       const res = await fetch('/api/admin/duplicates/merge', {
@@ -82,20 +87,23 @@ export function DeduplicationManager({ user }: DeduplicationManagerProps) {
       });
       const data = await res.json();
       if (res.ok) {
-        alert(data.message || 'Fusión completada con éxito.');
+        toast.success(data.message || 'Fusión completada con éxito.');
         setSelectedCase(null);
         fetchDuplicateCases();
       } else {
-        alert(data.error || 'Error al fusionar productos.');
+        toast.error(data.error || 'Error al fusionar productos.');
       }
     } catch (e) {
       console.error(e);
-      alert('Error de red al fusionar.');
+      toast.error('Error de red al fusionar.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const handleUpdateStatus = async (caseId: number, newStatus: string, notes?: string) => {
-    if (!user) return;
+    if (!user || isSubmitting) return;
+    setIsSubmitting(true);
     try {
       const token = await user.getIdToken();
       const res = await fetch(`/api/admin/duplicates/${caseId}/status`, {
@@ -107,11 +115,18 @@ export function DeduplicationManager({ user }: DeduplicationManagerProps) {
         body: JSON.stringify({ status: newStatus, notes })
       });
       if (res.ok) {
+        toast.success('Caso actualizado.');
         setSelectedCase(null);
         fetchDuplicateCases();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || 'No se pudo actualizar el caso.');
       }
     } catch (e) {
       console.error(e);
+      toast.error('Error de conexión al actualizar el caso.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -182,7 +197,7 @@ export function DeduplicationManager({ user }: DeduplicationManagerProps) {
       </div>
 
       {/* Filters */}
-      <div className="flex items-center gap-2 border-b border-slate-200 pb-3">
+      <div className="flex items-center gap-2 border-b border-slate-200 pb-3 overflow-x-auto">
         {['ALL', 'PENDING_REVIEW', 'DIFFERENT_MODELS', 'FALSE_POSITIVE', 'MERGED'].map(status => (
           <button
             key={status}
@@ -277,7 +292,7 @@ export function DeduplicationManager({ user }: DeduplicationManagerProps) {
                   <p className="text-[11px] text-slate-400">Score de Coincidencia: <span className="font-bold text-white">{selectedCase.duplicateScore}/100</span> | Clasificación: {selectedCase.classification}</p>
                 </div>
               </div>
-              <button onClick={() => setSelectedCase(null)} className="text-slate-300 hover:text-white">
+              <button type="button" aria-label="Cerrar" onClick={() => setSelectedCase(null)} className="p-1 text-slate-300 hover:text-white">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -373,15 +388,19 @@ export function DeduplicationManager({ user }: DeduplicationManagerProps) {
             </div>
 
             {/* Modal Actions */}
-            <div className="px-6 py-4 bg-slate-100 border-t border-slate-200 flex items-center justify-between flex-shrink-0">
-              <div className="flex items-center gap-2">
+            <div className="px-4 sm:px-6 py-4 bg-slate-100 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 flex-shrink-0">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                 <button
+                  type="button"
+                  disabled={isSubmitting}
                   onClick={() => handleUpdateStatus(selectedCase.id, 'FALSE_POSITIVE', 'Descartado como falso positivo')}
                   className="px-4 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 text-xs font-bold transition-colors shadow-xs"
                 >
                   Marcar Falso Positivo
                 </button>
                 <button
+                  type="button"
+                  disabled={isSubmitting}
                   onClick={() => handleUpdateStatus(selectedCase.id, 'DIFFERENT_MODELS', 'Confirmado como modelos diferentes')}
                   className="px-4 py-2.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 text-xs font-bold transition-colors"
                 >
@@ -390,8 +409,10 @@ export function DeduplicationManager({ user }: DeduplicationManagerProps) {
               </div>
 
               <button
+                type="button"
+                disabled={isSubmitting}
                 onClick={() => handleSecureMerge(selectedCase.productAId, selectedCase.productBId)}
-                className="px-6 py-2.5 rounded-xl bg-brand-cyan hover:bg-[#0087a3] text-white text-xs font-bold shadow-sm transition-colors flex items-center gap-2"
+                className="px-6 py-2.5 rounded-xl bg-brand-cyan hover:bg-[#0087a3] text-white text-xs font-bold shadow-sm transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
               >
                 <GitMerge className="w-4 h-4" /> Ejecutar Fusión Segura
               </button>

@@ -36,10 +36,10 @@ export const AnalyticsManager: React.FC<AnalyticsManagerProps> = ({ stats }) => 
         <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
           <span className="text-xs text-gray-500 block mb-1">Score Medio de Integridad</span>
           <div className="text-3xl font-black text-emerald-600">
-            {stats?.quality?.avgScore || 92}%
+            {stats?.quality?.avgScore ? `${stats.quality.avgScore}%` : 'Sin evaluar'}
           </div>
           <span className="text-[11px] text-gray-500 block mt-1">
-            Nivel Grado Médico Oficial
+            Promedio de productos con validación ejecutada
           </span>
         </div>
 
@@ -56,10 +56,10 @@ export const AnalyticsManager: React.FC<AnalyticsManagerProps> = ({ stats }) => 
         <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
           <span className="text-xs text-gray-500 block mb-1">Eficiencia Caché L2</span>
           <div className="text-3xl font-black text-cyan-700">
-            {stats?.system?.cacheHitRatio || 88}%
+            {stats?.system?.cacheHitRatio ?? 0}%
           </div>
           <span className="text-[11px] text-cyan-700 font-semibold block mt-1">
-            Latencia promedio &lt; 40ms
+            Consulta del panel: {stats?.system?.latencyMs ?? 0} ms
           </span>
         </div>
       </div>
@@ -126,30 +126,30 @@ export const AnalyticsManager: React.FC<AnalyticsManagerProps> = ({ stats }) => 
             <div>
               <div className="flex justify-between font-semibold text-gray-700 mb-1">
                 <span>Fotografía / Imagen Técnica Válida</span>
-                <span>97%</span>
+                <span>{stats?.quality?.imagesRatio ?? 0}%</span>
               </div>
               <div className="w-full bg-gray-100 rounded-full h-2">
-                <div className="bg-blue-600 h-2 rounded-full" style={{ width: '97%' }} />
+                <div className="bg-blue-600 h-2 rounded-full" style={{ width: `${stats?.quality?.imagesRatio ?? 0}%` }} />
               </div>
             </div>
 
             <div>
               <div className="flex justify-between font-semibold text-gray-700 mb-1">
                 <span>Especificaciones Técnicas Parseadas</span>
-                <span>91%</span>
+                <span>{stats?.quality?.specsRatio ?? 0}%</span>
               </div>
               <div className="w-full bg-gray-100 rounded-full h-2">
-                <div className="bg-indigo-600 h-2 rounded-full" style={{ width: '91%' }} />
+                <div className="bg-indigo-600 h-2 rounded-full" style={{ width: `${stats?.quality?.specsRatio ?? 0}%` }} />
               </div>
             </div>
 
             <div>
               <div className="flex justify-between font-semibold text-gray-700 mb-1">
                 <span>Enlace a Fuente Primaria Oficial</span>
-                <span>99%</span>
+                <span>{stats?.quality?.traceabilityRatio ?? 0}%</span>
               </div>
               <div className="w-full bg-gray-100 rounded-full h-2">
-                <div className="bg-emerald-600 h-2 rounded-full" style={{ width: '99%' }} />
+                <div className="bg-emerald-600 h-2 rounded-full" style={{ width: `${stats?.quality?.traceabilityRatio ?? 0}%` }} />
               </div>
             </div>
           </div>

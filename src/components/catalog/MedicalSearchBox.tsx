@@ -155,22 +155,42 @@ export const MedicalSearchBox: React.FC<MedicalSearchBoxProps> = ({
     localStorage.removeItem('izcor_recent_searches');
   };
 
-  const totalFlatItems = 
-    suggestions.products.length + 
-    suggestions.brands.length + 
-    suggestions.categories.length + 
-    suggestions.manufacturers.length + 
-    suggestions.models.length;
+  const handleSelectProduct = (prod: SuggestionItem) => {
+    saveRecentSearch(prod.name || searchTerm);
+    setIsOpen(false);
+    navigate(`/producto/${prod.slug || prod.id}`);
+  };
+
+  // Keyboard navigation runs over the rendered suggestions in display order.
+  const brandOffset = suggestions.products.length;
+  const categoryOffset = brandOffset + suggestions.brands.length;
+  const manufacturerOffset = categoryOffset + suggestions.categories.length;
+  const flatActions: Array<() => void> = [
+    ...suggestions.products.map(prod => () => handleSelectProduct(prod)),
+    ...suggestions.brands.map(brand => () => handleSelectTerm(brand.name || '')),
+    ...suggestions.categories.map(cat => () => handleSelectTerm(cat.name || '')),
+    ...suggestions.manufacturers.map(mfg => () => handleSelectTerm(mfg)),
+  ];
+  const totalFlatItems = flatActions.length;
+  const optionId = (index: number) => `medical-search-option-${index}`;
+  const optionClass = (index: number) => (selectedIndex === index ? 'ring-2 ring-brand-navy/40 bg-slate-100' : '');
+
+  useEffect(() => {
+    setSelectedIndex(-1);
+  }, [suggestions]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (!isOpen) return;
 
-    if (e.key === 'ArrowDown') {
+    if (e.key === 'ArrowDown' && totalFlatItems > 0) {
       e.preventDefault();
       setSelectedIndex(prev => (prev < totalFlatItems - 1 ? prev + 1 : 0));
-    } else if (e.key === 'ArrowUp') {
+    } else if (e.key === 'ArrowUp' && totalFlatItems > 0) {
       e.preventDefault();
       setSelectedIndex(prev => (prev > 0 ? prev - 1 : totalFlatItems - 1));
+    } else if (e.key === 'Enter' && selectedIndex >= 0 && selectedIndex < totalFlatItems) {
+      e.preventDefault();
+      flatActions[selectedIndex]();
     } else if (e.key === 'Escape') {
       setIsOpen(false);
     }
@@ -186,7 +206,7 @@ export const MedicalSearchBox: React.FC<MedicalSearchBoxProps> = ({
   return (
     <div ref={containerRef} className={`relative w-full ${className}`}>
       <form onSubmit={handleFormSubmit} className="relative">
-        <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-400">
+        <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-400 z-10">
           <Search className="w-4 h-4" />
         </div>
         <input
@@ -205,9 +225,12 @@ export const MedicalSearchBox: React.FC<MedicalSearchBoxProps> = ({
           placeholder={placeholder}
           autoFocus={autoFocus}
           className="w-full pl-11 pr-12 py-3 bg-white/95 backdrop-blur-xs border border-slate-200 rounded-xl text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-brand-navy focus:ring-2 focus:ring-brand-navy/10 shadow-2xs transition-all"
+          aria-label={placeholder || 'Buscar en el catálogo'}
+          role="combobox"
           aria-expanded={isOpen}
           aria-autocomplete="list"
           aria-controls="medical-search-results"
+          aria-activedescendant={selectedIndex >= 0 ? optionId(selectedIndex) : undefined}
         />
 
         <div className="absolute inset-y-0 right-0 pr-3 flex items-center gap-1.5">
@@ -292,16 +315,15 @@ export const MedicalSearchBox: React.FC<MedicalSearchBoxProps> = ({
                     Productos Médicos ({suggestions.products.length})
                   </span>
                   <div className="mt-1 space-y-0.5">
-                    {suggestions.products.map((prod) => (
+                    {suggestions.products.map((prod, i) => (
                       <button
                         key={prod.id}
+                        id={optionId(i)}
+                        role="option"
+                        aria-selected={selectedIndex === i}
                         type="button"
-                        onClick={() => {
-                          saveRecentSearch(prod.name || searchTerm);
-                          setIsOpen(false);
-                          navigate(`/producto/${prod.slug || prod.id}`);
-                        }}
-                        className="w-full text-left px-3 py-2 rounded-xl hover:bg-slate-50 transition-colors flex items-center justify-between group cursor-pointer"
+                        onClick={() => handleSelectProduct(prod)}
+                        className={`${optionClass(i)} w-full text-left px-3 py-2 rounded-xl hover:bg-slate-50 transition-colors flex items-center justify-between group cursor-pointer`}
                       >
                         <div className="min-w-0 pr-3">
                           <p className="text-xs font-bold text-slate-900 group-hover:text-brand-navy truncate">
@@ -339,12 +361,15 @@ export const MedicalSearchBox: React.FC<MedicalSearchBoxProps> = ({
                     Marcas ({suggestions.brands.length})
                   </span>
                   <div className="mt-1 flex flex-wrap gap-1 px-2">
-                    {suggestions.brands.map((brand) => (
+                    {suggestions.brands.map((brand, i) => (
                       <button
                         key={brand.id}
+                        id={optionId(brandOffset + i)}
+                        role="option"
+                        aria-selected={selectedIndex === brandOffset + i}
                         type="button"
                         onClick={() => handleSelectTerm(brand.name || '')}
-                        className="px-2.5 py-1 bg-cyan-50 hover:bg-cyan-100 text-cyan-800 rounded-lg text-xs font-bold transition-colors"
+                        className={`${optionClass(brandOffset + i)} px-2.5 py-1 bg-cyan-50 hover:bg-cyan-100 text-cyan-800 rounded-lg text-xs font-bold transition-colors`}
                       >
                         {brand.name}
                       </button>
@@ -360,12 +385,15 @@ export const MedicalSearchBox: React.FC<MedicalSearchBoxProps> = ({
                     Categorías ({suggestions.categories.length})
                   </span>
                   <div className="mt-1 flex flex-wrap gap-1 px-2">
-                    {suggestions.categories.map((cat) => (
+                    {suggestions.categories.map((cat, i) => (
                       <button
                         key={cat.id}
+                        id={optionId(categoryOffset + i)}
+                        role="option"
+                        aria-selected={selectedIndex === categoryOffset + i}
                         type="button"
                         onClick={() => handleSelectTerm(cat.name || '')}
-                        className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-lg text-xs font-bold transition-colors"
+                        className={`${optionClass(categoryOffset + i)} px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-lg text-xs font-bold transition-colors`}
                       >
                         {cat.name}
                       </button>
@@ -384,9 +412,12 @@ export const MedicalSearchBox: React.FC<MedicalSearchBoxProps> = ({
                     {suggestions.manufacturers.map((mfg, idx) => (
                       <button
                         key={idx}
+                        id={optionId(manufacturerOffset + idx)}
+                        role="option"
+                        aria-selected={selectedIndex === manufacturerOffset + idx}
                         type="button"
                         onClick={() => handleSelectTerm(mfg)}
-                        className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-800 rounded-lg text-xs font-semibold transition-colors"
+                        className={`${optionClass(manufacturerOffset + idx)} px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-800 rounded-lg text-xs font-semibold transition-colors`}
                       >
                         {mfg}
                       </button>

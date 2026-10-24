@@ -1,5 +1,5 @@
 import { drizzle as drizzlePg } from 'drizzle-orm/node-postgres';
-import { drizzle as drizzlePglite } from 'drizzle-orm/pglite';
+import { drizzle as drizzlePglite, type PgliteDatabase } from 'drizzle-orm/pglite';
 import { PGlite } from '@electric-sql/pglite';
 import { Pool } from 'pg';
 import * as schema from './schema.ts';
@@ -66,7 +66,7 @@ global._activeDb = drizzlePglite(defaultPglite, { schema });
 global._dbEngineType = 'pglite';
 
 // Export a proxy so any external references to `db` always resolve to the active engine
-export const db: any = new Proxy({}, {
+export const db = new Proxy({}, {
   get(target, prop, receiver) {
     const current = global._activeDb || drizzlePglite(getPgliteClient(), { schema });
     const val = Reflect.get(current, prop, receiver);
@@ -75,15 +75,45 @@ export const db: any = new Proxy({}, {
     }
     return val;
   }
-});
+}) as unknown as PgliteDatabase<typeof schema>;
 
 // Database initialization, schema bootstrap & auto-seeding
+// Applies the SQL files in drizzle/ in order. Statements that already ran
+// ("already exists" / "duplicate") are skipped, so it is safe on every boot.
+async function runMigrations(exec: (stmt: string) => Promise<unknown>) {
+  const migrationsDir = path.join(projectRoot, 'drizzle');
+  if (!fs.existsSync(migrationsDir)) {
+    console.warn('Nota: carpeta drizzle/ no encontrada; no se aplicaron migraciones.');
+    return;
+  }
+  const files = fs.readdirSync(migrationsDir).filter(f => f.endsWith('.sql')).sort();
+  for (const file of files) {
+    const statements = fs.readFileSync(path.join(migrationsDir, file), 'utf8')
+      .split('--> statement-breakpoint')
+      .map(st => st.trim())
+      .filter(st => st.length > 0);
+    for (const stmt of statements) {
+      try {
+        await exec(stmt);
+      } catch (e: any) {
+        const msg = String(e?.message || '');
+        if (!msg.includes('already exists') && !msg.includes('duplicate')) {
+          console.warn(`Aviso de migración (${file}): ${msg}`);
+        }
+      }
+    }
+  }
+}
+
 export async function initDatabase(): Promise<{ engine: 'postgres' | 'pglite'; seeded: boolean }> {
   let seeded = false;
   let usePostgres = false;
 
+  const isProduction = process.env.NODE_ENV === 'production';
+  const postgresConfigured = Boolean(process.env.DATABASE_URL || (process.env.SQL_HOST && process.env.SQL_HOST !== 'localhost'));
+
   // 1. Attempt PostgreSQL connection if configured
-  if (process.env.DATABASE_URL || (process.env.SQL_HOST && process.env.SQL_HOST !== 'localhost')) {
+  if (postgresConfigured) {
     try {
       const pool = createPool();
       const client = await pool.connect();
@@ -93,7 +123,12 @@ export async function initDatabase(): Promise<{ engine: 'postgres' | 'pglite'; s
       global._activeDb = drizzlePg(pool, { schema });
       global._dbEngineType = 'postgres';
       console.log('✅ [Database] Conectado exitosamente a PostgreSQL externo.');
+      await runMigrations((stmt) => pool.query(stmt));
     } catch (err: any) {
+      if (isProduction) {
+        // Never fall back to the local engine in production: its data would be lost on restart.
+        throw new Error(`No se pudo conectar a PostgreSQL en producción: ${err?.message || err}`);
+      }
       console.warn(`⚠️ [Database] No se pudo conectar a PostgreSQL (${err?.message || err}). Activando motor local PGlite.`);
       usePostgres = false;
     }
@@ -104,39 +139,10 @@ export async function initDatabase(): Promise<{ engine: 'postgres' | 'pglite'; s
     global._activeDb = drizzlePglite(pglite, { schema });
     global._dbEngineType = 'pglite';
     console.log('⚡ [Database] Motor PGlite PostgreSQL embebido activo (.data/pglite_db).');
-
-    // Execute migration SQL files to guarantee all 21 tables exist
-    try {
-      const migrations = [
-        path.join(projectRoot, 'drizzle', '0000_outgoing_vector.sql'),
-        path.join(projectRoot, 'drizzle', '0001_cuddly_the_call.sql'),
-        path.join(projectRoot, 'drizzle', '0002_stale_electro.sql'),
-      ];
-
-      for (const fullPath of migrations) {
-        if (fs.existsSync(fullPath)) {
-          const sqlContent = fs.readFileSync(fullPath, 'utf8');
-          // Split by statement breakpoint if present, or execute in batch
-          const statements = sqlContent
-            .split('--> statement-breakpoint')
-            .map(s => s.trim())
-            .filter(s => s.length > 0);
-
-          for (const stmt of statements) {
-            try {
-              await pglite.exec(stmt);
-            } catch (e: any) {
-              // Ignore "already exists" errors
-              if (!e?.message?.includes('already exists') && !e?.message?.includes('duplicate')) {
-                // non-fatal warning
-              }
-            }
-          }
-        }
-      }
-    } catch (err: any) {
-      console.warn('Nota de inicialización de migraciones en PGlite:', err.message);
+    if (isProduction) {
+      console.warn('⚠️ [Database] PRODUCCIÓN SIN DATABASE_URL: los datos se guardan en .data/ dentro del contenedor y se perderán al reiniciarlo. Configure DATABASE_URL con un PostgreSQL gestionado.');
     }
+    await runMigrations((stmt) => pglite.exec(stmt));
   }
 
   // 2. Check if database is empty and auto-seed

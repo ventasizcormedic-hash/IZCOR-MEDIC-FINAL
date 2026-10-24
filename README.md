@@ -132,6 +132,72 @@ El proyecto usa Drizzle con soporte a:
 
 La inicialización se realiza desde [src/db/index.ts](src/db/index.ts) y las migraciones de esquema se encuentran en [drizzle](drizzle).
 
+## Acceso al panel administrativo
+
+El panel `/admin` y todas las rutas `/api/admin/*` exigen una cuenta de Google con rol `ADMIN` o `SUPER_ADMIN` en la tabla `users`.
+
+Para designar al primer administrador:
+
+1. Inicie sesión una vez en `/admin` con la cuenta que será administradora (verá "Acceso restringido"; esto registra la cuenta).
+2. En el servidor, ejecute:
+
+```bash
+npm run set-role -- correo@ejemplo.com SUPER_ADMIN
+```
+
+3. Recargue `/admin`. Desde **Usuarios & Permisos**, un `SUPER_ADMIN` puede asignar o retirar roles de administrador; un usuario no puede cambiar su propio rol.
+
+En desarrollo local (`npm run dev`) el token `dev-admin-token` actúa como `SUPER_ADMIN` para pruebas de API; el servidor compilado (`npm start`) nunca lo acepta.
+
+## Despliegue en producción (Docker + PostgreSQL)
+
+La imagen incluye el frontend compilado, el servidor y las migraciones. Funciona en Google Cloud Run, Railway, Render, Fly.io o cualquier servidor con Docker.
+
+### 1. Requisitos
+- Una base **PostgreSQL gestionada** (Cloud SQL, Neon, Supabase, Railway…). Al primer arranque se crean las tablas y se carga el catálogo automáticamente.
+- En Firebase Console → Authentication → Settings → **Authorized domains**, agregar el dominio público (por ejemplo `www.izcormedic.com`), o el inicio de sesión del panel fallará.
+
+### 2. Construir y ejecutar
+
+```bash
+docker build -t izcor-medic .
+docker run -d -p 8080:8080 \
+  -e DATABASE_URL="postgres://usuario:clave@host:5432/izcor_medic" \
+  -e APP_URL="https://www.izcormedic.com" \
+  -e GEMINI_API_KEY="..." \
+  izcor-medic
+```
+
+Variables:
+
+| Variable | Obligatoria | Uso |
+|---|---|---|
+| `DATABASE_URL` | Sí | PostgreSQL. En producción, si no conecta, el contenedor se detiene en lugar de usar una base temporal. |
+| `APP_URL` | Recomendada | URL pública para `robots.txt` y `sitemap.xml`. |
+| `GEMINI_API_KEY` | No | Análisis automático de TDR. |
+| `PORT` | No | Puerto (por defecto `8080` en la imagen). |
+
+### 3. Primer administrador
+1. Abra `https://su-dominio/admin` e inicie sesión con Google (verá "Acceso restringido").
+2. Ejecute dentro del contenedor:
+
+```bash
+docker exec <contenedor> npm run set-role:prod -- correo@ejemplo.com SUPER_ADMIN
+```
+
+(En Cloud Run, ejecute el mismo comando como *job* con la misma imagen y `DATABASE_URL`, o use `npm run set-role` desde su equipo apuntando `DATABASE_URL` a la base de producción.)
+
+### 4. Qué incluye la configuración de producción
+- Archivos TDR guardados en la base de datos, descargables solo por administradores.
+- Límite de envíos en formularios públicos (20 cada 15 min por IP y formulario; 5 para el análisis con IA).
+- HSTS bajo HTTPS, `trust proxy`, errores de API en JSON y `/api` inexistente con 404.
+- Healthcheck en `/api/health`; el contenedor corre como usuario sin privilegios.
+
+### 5. Verificación posterior al despliegue
+- `GET /api/health` responde `{"status":"ok"}`.
+- El catálogo `/productos` muestra productos y una cotización de prueba aparece en **Admin → Solicitudes de Clientes**.
+- `robots.txt` muestra el `APP_URL` correcto.
+
 ## Firebase
 
 La configuración web de Firebase está en [firebase-applet-config.json](firebase-applet-config.json) y se usa desde [src/lib/firebase.ts](src/lib/firebase.ts). La configuración administrativa se usa en [src/lib/firebase-admin.ts](src/lib/firebase-admin.ts).

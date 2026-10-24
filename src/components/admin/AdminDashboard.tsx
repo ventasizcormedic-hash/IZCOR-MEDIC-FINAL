@@ -48,9 +48,9 @@ interface DashboardStats {
   system: {
     status: string;
     latencyMs: number;
-    errorRate: number;
+    errorRate?: number;
     cacheHitRatio: number;
-    workers: number;
+    workers?: number;
   };
   recentActivity: Array<{
     id: number | string;
@@ -115,16 +115,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     tdr: 0,
     activeJobs: 0,
     possibleDuplicates: 0,
+    // Empty placeholders while loading: never show invented percentages.
     quality: {
-      avgScore: 90,
+      avgScore: 0,
       openIssues: 0,
       criticalIssues: 0,
       incompleteProducts: 0,
-      completenessRatio: 92,
-      traceabilityRatio: 98,
-      imagesRatio: 95,
-      specsRatio: 88,
-      freshnessRatio: 87,
+      completenessRatio: 0,
+      traceabilityRatio: 0,
+      imagesRatio: 0,
+      specsRatio: 0,
+      freshnessRatio: 0,
+      modelsRatio: 0,
     },
     automation: {
       activeJobs: 0,
@@ -136,10 +138,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     },
     system: {
       status: 'HEALTHY',
-      latencyMs: 35,
-      errorRate: 0.1,
-      cacheHitRatio: 89,
-      workers: 4,
+      latencyMs: 0,
+      cacheHitRatio: 0,
     },
     recentActivity: [],
     priorityAlerts: [],
@@ -263,7 +263,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <h2 className="text-lg font-bold text-gray-900">Métricas Principales del Catálogo</h2>
             <p className="text-xs text-gray-500">Haz clic en cualquier métrica para acceder a su vista filtrada</p>
           </div>
-          <span className="text-xs text-gray-400 font-medium">Actualizado hace instantes</span>
+          <span className="text-xs text-gray-400 font-medium">
+            {(stats as any)?.generatedAt
+              ? `Actualizado: ${new Date((stats as any).generatedAt).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}`
+              : 'Cargando...'}
+          </span>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 md:gap-4">
@@ -429,10 +433,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <div>
               <div className="flex justify-between text-xs font-semibold text-gray-700 mb-1">
                 <span>Modelos &amp; Códigos de Referencia Exactos</span>
-                <span>96%</span>
+                <span>{(s.quality as any).modelsRatio ?? 0}%</span>
               </div>
               <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
-                <div className="bg-indigo-600 h-2 rounded-full" style={{ width: '96%' }} />
+                <div className="bg-indigo-600 h-2 rounded-full" style={{ width: `${(s.quality as any).modelsRatio ?? 0}%` }} />
               </div>
             </div>
           </div>

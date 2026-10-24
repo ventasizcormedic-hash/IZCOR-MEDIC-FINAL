@@ -5,9 +5,9 @@ interface Manufacturer {
   id: number;
   name: string;
   productCount: number;
-  country: string;
+  country: string | null;
   status: string;
-  qualityScore: number;
+  qualityScore: number | null;
   sourcesCount: number;
 }
 
@@ -23,21 +23,23 @@ export const ManufacturersManager: React.FC<ManufacturersManagerProps> = ({
   const [manufacturers, setManufacturers] = useState<Manufacturer[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
   const fetchManufacturers = async () => {
     if (!user) return;
     setIsLoading(true);
+    setLoadError(false);
     try {
       const token = await user.getIdToken();
       const res = await fetch('/api/admin/manufacturers', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
-      if (res.ok && Array.isArray(data)) {
-        setManufacturers(data);
-      }
+      if (!res.ok || !Array.isArray(data)) throw new Error(data?.error || `HTTP ${res.status}`);
+      setManufacturers(data);
     } catch (err) {
       console.error(err);
+      setLoadError(true);
     } finally {
       setIsLoading(false);
     }
@@ -62,9 +64,11 @@ export const ManufacturersManager: React.FC<ManufacturersManagerProps> = ({
         </div>
 
         <button
+          type="button"
           onClick={fetchManufacturers}
-          className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50 text-gray-600 transition"
+          className="self-start p-2 rounded-lg border border-gray-200 hover:bg-gray-50 text-gray-600 transition"
           title="Actualizar listado"
+          aria-label="Actualizar listado"
         >
           <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
         </button>
@@ -73,7 +77,8 @@ export const ManufacturersManager: React.FC<ManufacturersManagerProps> = ({
       <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-center gap-3">
         <Search className="w-4 h-4 text-gray-400" />
         <input
-          type="text"
+          type="search"
+          aria-label="Buscar fabricante"
           placeholder="Buscar fabricante por nombre..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
@@ -81,12 +86,11 @@ export const ManufacturersManager: React.FC<ManufacturersManagerProps> = ({
         />
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-        <table className="w-full text-left border-collapse text-xs">
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
+        <table className="w-full min-w-[640px] text-left border-collapse text-xs">
           <thead>
             <tr className="bg-gray-50/80 border-b border-gray-200 text-[11px] font-bold text-gray-500 uppercase tracking-wider">
               <th className="p-3.5">Fabricante</th>
-              <th className="p-3.5">País Origen</th>
               <th className="p-3.5">Productos Asociados</th>
               <th className="p-3.5">Fuentes de Extracción</th>
               <th className="p-3.5">Calidad Promedio</th>
@@ -97,14 +101,21 @@ export const ManufacturersManager: React.FC<ManufacturersManagerProps> = ({
           <tbody className="divide-y divide-gray-100 text-gray-700">
             {isLoading ? (
               <tr>
-                <td colSpan={7} className="p-10 text-center text-gray-400">
+                <td colSpan={6} className="p-10 text-center text-gray-400">
                   <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-blue-600" />
                   Cargando fabricantes...
                 </td>
               </tr>
+            ) : loadError ? (
+              <tr>
+                <td colSpan={6} className="p-10 text-center text-rose-600">
+                  No se pudo cargar el listado.{' '}
+                  <button type="button" onClick={fetchManufacturers} className="font-bold underline">Reintentar</button>
+                </td>
+              </tr>
             ) : filtered.length === 0 ? (
               <tr>
-                <td colSpan={7} className="p-10 text-center text-gray-400">
+                <td colSpan={6} className="p-10 text-center text-gray-400">
                   No se encontraron fabricantes registrados en el catálogo.
                 </td>
               </tr>
@@ -117,11 +128,16 @@ export const ManufacturersManager: React.FC<ManufacturersManagerProps> = ({
                       {m.name}
                     </div>
                   </td>
-                  <td className="p-3.5 text-gray-600">{m.country}</td>
                   <td className="p-3.5 font-semibold text-gray-900">{m.productCount.toLocaleString()} items</td>
-                  <td className="p-3.5 text-gray-600">{m.sourcesCount} oficial{m.sourcesCount > 1 ? 'es' : ''}</td>
+                  <td className="p-3.5 text-gray-600">
+                    {m.sourcesCount > 0 ? `${m.sourcesCount} URL${m.sourcesCount > 1 ? 's' : ''} de origen` : 'Sin fuente registrada'}
+                  </td>
                   <td className="p-3.5">
-                    <span className="font-bold text-emerald-600">{m.qualityScore}%</span>
+                    {m.qualityScore ? (
+                      <span className={`font-bold ${m.qualityScore >= 85 ? 'text-emerald-600' : 'text-amber-600'}`}>{m.qualityScore}%</span>
+                    ) : (
+                      <span className="text-gray-400">Sin evaluar</span>
+                    )}
                   </td>
                   <td className="p-3.5">
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
@@ -130,6 +146,7 @@ export const ManufacturersManager: React.FC<ManufacturersManagerProps> = ({
                   </td>
                   <td className="p-3.5 text-right">
                     <button
+                      type="button"
                       onClick={() => onFilterProductsByManufacturer?.(m.name)}
                       className="px-3 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-md font-semibold text-[11px] transition inline-flex items-center gap-1"
                     >

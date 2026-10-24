@@ -6,6 +6,7 @@ import {
   Layers, Clock, ArrowRight, Eye, ChevronRight, Filter, 
   Sliders, Activity, Check, Info, FileText, Zap, AlertOctagon
 } from 'lucide-react';
+import { useAdminFeedback } from './ui/AdminFeedback';
 
 export interface AutonomousEngineManagerProps {
   user: User | null;
@@ -13,6 +14,7 @@ export interface AutonomousEngineManagerProps {
 }
 
 export const AutonomousEngineManager: React.FC<AutonomousEngineManagerProps> = ({ user, onRefresh }) => {
+  const { toast, confirm: confirmDialog } = useAdminFeedback();
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<any>(null);
   const [settings, setSettings] = useState<any>(null);
@@ -47,6 +49,7 @@ export const AutonomousEngineManager: React.FC<AutonomousEngineManagerProps> = (
       }
     } catch (e) {
       console.error('Error fetching autonomous dashboard:', e);
+      toast.error('No se pudo cargar el estado del motor autónomo.');
     } finally {
       setLoading(false);
     }
@@ -57,6 +60,13 @@ export const AutonomousEngineManager: React.FC<AutonomousEngineManagerProps> = (
   }, [user]);
 
   const handleRunCycle = async () => {
+    const ok = await confirmDialog({
+      title: '¿Ejecutar el ciclo autónomo ahora?',
+      message: 'El motor descubrirá, validará y podrá publicar productos automáticamente según las reglas configuradas.',
+      confirmLabel: 'Ejecutar ciclo',
+      tone: 'primary',
+    });
+    if (!ok) return;
     try {
       setRunningCycle(true);
       setActionMessage('Iniciando ciclo autónomo: descubrimiento, normalización, validación y publicación...');
@@ -86,6 +96,17 @@ export const AutonomousEngineManager: React.FC<AutonomousEngineManagerProps> = (
 
   const handleToggleEmergencyStop = async () => {
     if (!settings) return;
+    const ok = await confirmDialog(settings.emergencyStop ? {
+      title: '¿Reanudar el motor autónomo?',
+      message: 'Las extracciones y publicaciones automáticas volverán a ejecutarse.',
+      confirmLabel: 'Reanudar',
+      tone: 'primary',
+    } : {
+      title: '¿Activar la parada de emergencia?',
+      message: 'Se detendrán todas las extracciones y publicaciones automáticas.',
+      confirmLabel: 'Detener motor',
+    });
+    if (!ok) return;
     try {
       setStoppingEmergency(true);
       const token = user ? await user.getIdToken() : '';
@@ -104,6 +125,8 @@ export const AutonomousEngineManager: React.FC<AutonomousEngineManagerProps> = (
       if (json.success) {
         setActionMessage(json.message);
         fetchDashboard();
+      } else {
+        toast.error(json.error || json.message || 'La operación no se pudo completar.');
       }
     } catch (e: any) {
       setActionMessage(`Error: ${e.message}`);
@@ -113,6 +136,14 @@ export const AutonomousEngineManager: React.FC<AutonomousEngineManagerProps> = (
   };
 
   const handleUpdateMode = async (mode: string) => {
+    if (settings?.operatingMode === mode) return;
+    const ok = await confirmDialog({
+      title: `¿Cambiar el modo operativo a ${mode}?`,
+      message: 'Cambia cuánto puede publicar el motor sin revisión humana.',
+      confirmLabel: 'Cambiar modo',
+      tone: 'primary',
+    });
+    if (!ok) return;
     try {
       const token = user ? await user.getIdToken() : '';
       const res = await fetch('/api/admin/autonomous/settings', {
@@ -127,9 +158,12 @@ export const AutonomousEngineManager: React.FC<AutonomousEngineManagerProps> = (
       if (json.success) {
         setSettings(json.settings);
         setActionMessage(`Modo operativo cambiado a: ${mode}`);
+      } else {
+        toast.error(json.error || json.message || 'La operación no se pudo completar.');
       }
     } catch (e: any) {
       console.error(e);
+      toast.error(`Error de conexión: ${e.message}`);
     }
   };
 
@@ -148,9 +182,12 @@ export const AutonomousEngineManager: React.FC<AutonomousEngineManagerProps> = (
       if (json.success) {
         setSettings(json.settings);
         setActionMessage('Configuración de reglas actualizada correctamente.');
+      } else {
+        toast.error(json.error || json.message || 'La operación no se pudo completar.');
       }
     } catch (e: any) {
       console.error(e);
+      toast.error(`Error de conexión: ${e.message}`);
     }
   };
 
@@ -167,6 +204,8 @@ export const AutonomousEngineManager: React.FC<AutonomousEngineManagerProps> = (
       if (json.success) {
         setActionMessage(`Reconciliación completada. Revisados: ${json.checked}, Auto-reparados: ${json.repaired}.`);
         fetchDashboard();
+      } else {
+        toast.error(json.error || json.message || 'La operación no se pudo completar.');
       }
     } catch (e: any) {
       setActionMessage(`Error en reconciliación: ${e.message}`);
@@ -177,6 +216,12 @@ export const AutonomousEngineManager: React.FC<AutonomousEngineManagerProps> = (
 
   const handleRollback = async () => {
     if (!rollbackJobId.trim()) return;
+    const ok = await confirmDialog({
+      title: `¿Revertir los cambios del job ${rollbackJobId.trim()}?`,
+      message: 'Los productos publicados o actualizados por ese job volverán a su estado anterior.',
+      confirmLabel: 'Revertir',
+    });
+    if (!ok) return;
     try {
       setRollbackInProgress(true);
       const token = user ? await user.getIdToken() : '';
@@ -214,13 +259,17 @@ export const AutonomousEngineManager: React.FC<AutonomousEngineManagerProps> = (
       if (json.success) {
         setActionMessage(json.message);
         fetchDashboard();
+      } else {
+        toast.error(json.error || json.message || 'La operación no se pudo completar.');
       }
     } catch (e: any) {
       console.error(e);
+      toast.error(`Error de conexión: ${e.message}`);
     }
   };
 
   const handleRejectDraft = async (id: number) => {
+    if (!(await confirmDialog({ title: '¿Rechazar este borrador?', confirmLabel: 'Rechazar' }))) return;
     try {
       const token = user ? await user.getIdToken() : '';
       const res = await fetch(`/api/admin/autonomous/reject-draft/${id}`, {
@@ -231,9 +280,12 @@ export const AutonomousEngineManager: React.FC<AutonomousEngineManagerProps> = (
       if (json.success) {
         setActionMessage(json.message);
         fetchDashboard();
+      } else {
+        toast.error(json.error || json.message || 'La operación no se pudo completar.');
       }
     } catch (e: any) {
       console.error(e);
+      toast.error(`Error de conexión: ${e.message}`);
     }
   };
 
@@ -248,9 +300,12 @@ export const AutonomousEngineManager: React.FC<AutonomousEngineManagerProps> = (
       if (json.success) {
         setActionMessage(json.message);
         fetchDashboard();
+      } else {
+        toast.error(json.error || json.message || 'La operación no se pudo completar.');
       }
     } catch (e: any) {
       console.error(e);
+      toast.error(`Error de conexión: ${e.message}`);
     }
   };
 

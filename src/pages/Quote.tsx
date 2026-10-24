@@ -10,8 +10,9 @@ import { useQuote } from '../context/QuoteContext';
 import { SeoHead } from '../components/seo/SeoHead';
 
 export function Quote() {
-  const [searchParams] = useSearchParams();
-  const productId = searchParams.get('productId');
+  const [searchParams, setSearchParams] = useSearchParams();
+  // Product CTAs link with ?product=<id>; ?productId= is kept for older links.
+  const productId = searchParams.get('product') || searchParams.get('productId');
   const { items, itemCount, updateQuantity, removeItem, clearTray, addItem } = useQuote();
 
   const [loading, setLoading] = useState(false);
@@ -29,7 +30,7 @@ export function Quote() {
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [notes, setNotes] = useState('');
-  const [acceptedTerms, setAcceptedTerms] = useState(true);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
 
   // Fetch product if URL has ?productId=
   useEffect(() => {
@@ -49,12 +50,17 @@ export function Quote() {
                 imageUrl: data.imageUrl || (data.images && data.images[0]?.url) || null,
                 slug: data.slug || '',
                 categoryName: data.category?.name || data.categoryName || '',
-              });
+              }, { ifMissing: true });
             }
           })
           .catch(err => console.error('Error fetching product for quote:', err))
           .finally(() => setFetchingProduct(false));
       }
+      // Drop the param so removing the item and reloading doesn't add it back.
+      const next = new URLSearchParams(searchParams);
+      next.delete('product');
+      next.delete('productId');
+      setSearchParams(next, { replace: true });
     }
   }, [productId]);
 
@@ -97,6 +103,7 @@ export function Quote() {
       setQuoteId(data.quoteId || data.id || null);
       setSuccess(true);
       clearTray();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err: any) {
       setSubmitError(err.message || 'Error de red. Por favor intente nuevamente.');
     } finally {
@@ -255,27 +262,31 @@ export function Quote() {
                           <button 
                             type="button" 
                             onClick={() => updateQuantity(item.id, -1)}
-                            className="w-5 h-5 flex items-center justify-center text-slate-500 hover:text-slate-900 rounded hover:bg-white transition-colors"
+                            aria-label={`Reducir cantidad de ${item.name}`}
+                            className="w-9 h-9 flex items-center justify-center text-slate-500 hover:text-slate-900 rounded hover:bg-white transition-colors"
                           >
-                            <Minus className="w-3 h-3" />
+                            <Minus className="w-3.5 h-3.5" />
                           </button>
-                          <span className="w-4 text-center font-bold text-xs text-slate-800">
+                          <span className="min-w-5 text-center font-bold text-xs text-slate-800" aria-live="polite">
                             {item.quantity}
                           </span>
                           <button 
                             type="button" 
                             onClick={() => updateQuantity(item.id, 1)}
-                            className="w-5 h-5 flex items-center justify-center text-slate-500 hover:text-slate-900 rounded hover:bg-white transition-colors"
+                            aria-label={`Aumentar cantidad de ${item.name}`}
+                            className="w-9 h-9 flex items-center justify-center text-slate-500 hover:text-slate-900 rounded hover:bg-white transition-colors"
                           >
-                            <Plus className="w-3 h-3" />
+                            <Plus className="w-3.5 h-3.5" />
                           </button>
                         </div>
                         
                         {/* Remove */}
                         <button 
+                          type="button"
                           onClick={() => removeItem(item.id)}
-                          className="text-slate-400 hover:text-red-600 transition-colors p-1 rounded-lg hover:bg-red-50"
+                          className="w-9 h-9 flex items-center justify-center text-slate-400 hover:text-red-600 transition-colors rounded-lg hover:bg-red-50"
                           title="Eliminar de lista"
+                          aria-label={`Eliminar ${item.name} de la cotización`}
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>

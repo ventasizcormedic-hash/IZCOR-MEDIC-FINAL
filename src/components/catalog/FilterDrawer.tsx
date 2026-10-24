@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useRef } from 'react';
+import { useModalBehavior } from '../../hooks/useModalBehavior';
 import { X, RotateCcw, Filter, Check } from 'lucide-react';
 import { FilterSidebar } from './FilterSidebar';
 import { CategoryWithSubcategories, Brand } from '../../types';
@@ -56,10 +57,13 @@ export function FilterDrawer({
   hasActiveFilters,
   totalResults,
 }: FilterDrawerProps) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  useModalBehavior(isOpen, onClose, panelRef);
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 overflow-hidden" role="dialog" aria-modal="true">
+    <div className="fixed inset-0 z-50 overflow-hidden" role="dialog" aria-modal="true" aria-labelledby="filter-drawer-title">
       {/* Backdrop */}
       <div 
         className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity"
@@ -68,13 +72,13 @@ export function FilterDrawer({
 
       {/* Drawer Panel */}
       <div className="fixed inset-y-0 right-0 max-w-full flex pl-10">
-        <div className="w-screen max-w-md bg-white shadow-2xl flex flex-col">
+        <div ref={panelRef} className="w-screen max-w-md bg-white shadow-2xl flex flex-col">
           
           {/* Drawer Header */}
           <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
             <div className="flex items-center gap-2">
               <Filter className="w-5 h-5 text-brand-navy" />
-              <h2 className="text-base font-black text-slate-900">
+              <h2 id="filter-drawer-title" className="text-base font-black text-slate-900">
                 Filtros del Catálogo
               </h2>
             </div>

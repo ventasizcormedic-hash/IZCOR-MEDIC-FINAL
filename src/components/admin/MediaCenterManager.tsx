@@ -50,7 +50,7 @@ export const MediaCenterManager: React.FC<MediaCenterManagerProps> = ({
         <button
           onClick={fetchMediaOverview}
           className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50 text-gray-600 transition"
-          title="Actualizar métricas multimedia"
+          title="Actualizar métricas multimedia" aria-label="Actualizar métricas multimedia"
         >
           <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
         </button>
@@ -83,6 +83,7 @@ export const MediaCenterManager: React.FC<MediaCenterManagerProps> = ({
           </div>
           <div className="text-2xl font-black text-amber-900">{overview?.productsWithoutImage?.toLocaleString() || 0}</div>
           <button
+            type="button"
             onClick={onFilterProductsWithoutImage}
             className="text-[11px] text-blue-600 font-bold hover:underline mt-1 block"
           >
@@ -92,18 +93,18 @@ export const MediaCenterManager: React.FC<MediaCenterManagerProps> = ({
 
         <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
           <div className="flex items-center justify-between text-gray-500 text-xs mb-1">
-            <span>Integridad de Enlaces</span>
-            <ShieldCheck className="w-4 h-4 text-emerald-600" />
+            <span>Sin Ficha Técnica / Documento</span>
+            <ShieldCheck className="w-4 h-4 text-amber-600" />
           </div>
-          <div className="text-2xl font-black text-emerald-600">100%</div>
-          <div className="text-[11px] text-gray-400 mt-1">0 enlaces rotos detectados</div>
+          <div className="text-2xl font-black text-gray-900">{overview?.productsWithoutDoc?.toLocaleString() || 0}</div>
+          <div className="text-[11px] text-gray-400 mt-1">productos sin ningún PDF asociado</div>
         </div>
       </div>
 
       {/* Media Auditor Workspace */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 space-y-4">
-        <div className="flex items-center justify-between border-b border-gray-100 pb-3">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-3">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => setActiveMediaTab('IMAGES')}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
@@ -151,8 +152,12 @@ export const MediaCenterManager: React.FC<MediaCenterManagerProps> = ({
               <div className="font-bold text-gray-800">Métricas de Documentación Técnica:</div>
               <div className="grid grid-cols-2 gap-4 mt-2">
                 <div className="p-3 bg-white rounded-lg border border-gray-200">
-                  <span className="text-gray-500 block">Fichas Técnicas Validadas:</span>
-                  <span className="font-bold text-gray-900 text-sm">98.4% de catálogo clave</span>
+                  <span className="text-gray-500 block">Productos con documentación:</span>
+                  <span className="font-bold text-gray-900 text-sm">
+                    {overview?.totalProducts
+                      ? `${Math.round(((overview.totalProducts - (overview.productsWithoutDoc || 0)) / overview.totalProducts) * 100)}% del catálogo`
+                      : 'Sin datos'}
+                  </span>
                 </div>
                 <div className="p-3 bg-white rounded-lg border border-gray-200">
                   <span className="text-gray-500 block">Protocolo de Descarga:</span>

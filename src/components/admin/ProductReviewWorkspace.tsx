@@ -5,12 +5,14 @@ import {
   RefreshCw, FileText, Eye, Check, X, ShieldAlert, Sparkles, Filter, 
   Layers, Package, Tag, Globe, ArrowRight, Save, ArrowLeft, GitMerge, History, Image as ImageIcon
 } from 'lucide-react';
+import { useAdminFeedback } from './ui/AdminFeedback';
 
 interface ProductReviewWorkspaceProps {
   user: User | null;
 }
 
 export function ProductReviewWorkspace({ user }: ProductReviewWorkspaceProps) {
+  const { toast, confirm: confirmDialog } = useAdminFeedback();
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -22,6 +24,7 @@ export function ProductReviewWorkspace({ user }: ProductReviewWorkspaceProps) {
   const [editForm, setEditForm] = useState<any>({});
   const [editReason, setEditReason] = useState('Corrección y validación administrativa');
   const [message, setMessage] = useState({ text: '', type: '' });
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const fetchProducts = async () => {
     if (!user) return;
@@ -31,12 +34,11 @@ export function ProductReviewWorkspace({ user }: ProductReviewWorkspaceProps) {
       const res = await fetch('/api/admin/review/products', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      if (res.ok) {
-        const data = await res.json();
-        setProducts(data);
-      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setProducts(await res.json());
     } catch (e) {
       console.error(e);
+      toast.error('No se pudo cargar la cola de revisión.');
     } finally {
       setLoading(false);
     }
@@ -63,9 +65,14 @@ export function ProductReviewWorkspace({ user }: ProductReviewWorkspaceProps) {
           application: data.application || '',
           presentation: data.presentation || '',
         });
+      } else {
+        toast.error('No se pudo abrir la ficha de revisión.');
+        setSelectedId(null);
       }
     } catch (e) {
       console.error(e);
+      toast.error('Error de conexión al abrir la ficha.');
+      setSelectedId(null);
     } finally {
       setDetailLoading(false);
     }
@@ -84,8 +91,9 @@ export function ProductReviewWorkspace({ user }: ProductReviewWorkspaceProps) {
   }, [selectedId]);
 
   const handleSaveEdit = async () => {
-    if (!user || !selectedId) return;
+    if (!user || !selectedId || isSubmitting) return;
     setMessage({ text: '', type: '' });
+    setIsSubmitting(true);
     try {
       const token = await user.getIdToken();
       const res = await fetch(`/api/admin/review/products/${selectedId}`, {
@@ -107,12 +115,16 @@ export function ProductReviewWorkspace({ user }: ProductReviewWorkspaceProps) {
     } catch (e) {
       console.error(e);
       setMessage({ text: 'Error de red al guardar.', type: 'error' });
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const handleUpdateStatus = async (newStatus: string, notes?: string) => {
     if (!user || !selectedId) return;
-    if (!confirm(`¿Estás seguro de cambiar el estado a ${newStatus}?`)) return;
+    if (isSubmitting) return;
+    if (!(await confirmDialog({ title: `¿Cambiar el estado a ${newStatus}?`, confirmLabel: 'Cambiar estado', tone: newStatus === 'REJECTED' ? 'danger' : 'primary' }))) return;
+    setIsSubmitting(true);
     try {
       const token = await user.getIdToken();
       const res = await fetch(`/api/admin/review/products/${selectedId}/status`, {
@@ -125,14 +137,17 @@ export function ProductReviewWorkspace({ user }: ProductReviewWorkspaceProps) {
       });
       const data = await res.json();
       if (res.ok) {
-        alert(data.message || 'Estado actualizado.');
+        toast.success(data.message || 'Estado actualizado.');
         fetchProductDetail(selectedId);
         fetchProducts();
       } else {
-        alert(data.error || 'Error al actualizar estado.');
+        toast.error(data.error || 'Error al actualizar estado.');
       }
     } catch (e) {
       console.error(e);
+      toast.error('Error de conexión al actualizar el estado.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -147,21 +162,31 @@ export function ProductReviewWorkspace({ user }: ProductReviewWorkspaceProps) {
     return true;
   });
 
+  if (selectedId && detailLoading && !productDetail) {
+    return (
+      <div className="p-16 text-center text-slate-500 text-sm" role="status">
+        <div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full mx-auto mb-3" />
+        Cargando ficha de revisión...
+      </div>
+    );
+  }
+
   // If a product is selected, render the deep review workspace
   if (selectedId && productDetail) {
     const historyEntries = productDetail.auditReport?.history || [];
     return (
       <div className="space-y-6">
         {/* Top Navigation & Actions Bar */}
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex items-center justify-between">
+        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-3">
           <button
+            type="button"
             onClick={() => setSelectedId(null)}
             className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl flex items-center gap-2 transition-colors"
           >
             <ArrowLeft className="w-4 h-4" /> Volver a la Cola de Revisión
           </button>
           
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             <span className={`px-3 py-1 rounded-full text-xs font-bold ${
               productDetail.publicationStatus === 'PUBLISHED' ? 'bg-indigo-100 text-indigo-800' : 'bg-slate-100 text-slate-500'
             }`}>
@@ -175,18 +200,24 @@ export function ProductReviewWorkspace({ user }: ProductReviewWorkspaceProps) {
               Estado: {productDetail.verificationStatus}
             </span>
             <button
+              type="button"
+              disabled={isSubmitting}
               onClick={() => handleUpdateStatus('REVIEW', 'Devuelto a revisión administrativa')}
               className="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold text-xs rounded-xl transition-colors"
             >
               Devolver a Review
             </button>
             <button
+              type="button"
+              disabled={isSubmitting}
               onClick={() => handleUpdateStatus('REJECTED', 'Rechazado en centro de control de calidad')}
               className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-700 font-bold text-xs rounded-xl transition-colors"
             >
               Rechazar / Despublicar
             </button>
             <button
+              type="button"
+              disabled={isSubmitting}
               onClick={() => handleUpdateStatus('VERIFIED', 'Verificado y aprobado por administrador')}
               className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5"
             >
@@ -327,8 +358,10 @@ export function ProductReviewWorkspace({ user }: ProductReviewWorkspaceProps) {
               </div>
 
               <button
+                type="button"
                 onClick={handleSaveEdit}
-                className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-sm transition-colors flex items-center gap-2"
+                disabled={isSubmitting}
+                className="disabled:opacity-60 px-6 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-sm transition-colors flex items-center gap-2"
               >
                 <Save className="w-4 h-4" /> Guardar Cambios de Identidad
               </button>
@@ -348,8 +381,10 @@ export function ProductReviewWorkspace({ user }: ProductReviewWorkspaceProps) {
                 />
               </div>
               <button
+                type="button"
                 onClick={handleSaveEdit}
-                className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-sm transition-colors flex items-center gap-2"
+                disabled={isSubmitting}
+                className="disabled:opacity-60 px-6 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-sm transition-colors flex items-center gap-2"
               >
                 <Save className="w-4 h-4" /> Guardar Contenido
               </button>
@@ -369,8 +404,10 @@ export function ProductReviewWorkspace({ user }: ProductReviewWorkspaceProps) {
                 />
               </div>
               <button
+                type="button"
                 onClick={handleSaveEdit}
-                className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-sm transition-colors flex items-center gap-2"
+                disabled={isSubmitting}
+                className="disabled:opacity-60 px-6 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-sm transition-colors flex items-center gap-2"
               >
                 <Save className="w-4 h-4" /> Guardar Especificaciones
               </button>
@@ -489,11 +526,12 @@ export function ProductReviewWorkspace({ user }: ProductReviewWorkspaceProps) {
         </div>
         <div className="flex items-center gap-3">
           <input
-            type="text"
+            type="search"
+            aria-label="Buscar en la cola de revisión"
             placeholder="Buscar por nombre, modelo..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="px-3 py-2 text-xs border border-slate-200 rounded-xl w-64 focus:outline-hidden focus:ring-2 focus:ring-brand-cyan/20"
+            className="px-3 py-2 text-xs border border-slate-200 rounded-xl w-full sm:w-64 focus:outline-hidden focus:ring-2 focus:ring-brand-cyan/20"
           />
         </div>
       </div>
@@ -566,6 +604,7 @@ export function ProductReviewWorkspace({ user }: ProductReviewWorkspaceProps) {
                     </td>
                     <td className="py-3 px-4 text-right">
                       <button
+                        type="button"
                         onClick={() => setSelectedId(p.id)}
                         className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs inline-flex items-center gap-1 shadow-xs"
                       >

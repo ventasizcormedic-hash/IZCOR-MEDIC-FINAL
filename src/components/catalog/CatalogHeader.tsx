@@ -139,8 +139,9 @@ export function CatalogHeader({
             
             {/* Mobile Filter Button */}
             <button
+              type="button"
               onClick={onOpenMobileFilters}
-              className="lg:hidden inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-slate-800 text-xs font-bold hover:bg-slate-100 transition-colors relative"
+              className="lg:hidden inline-flex items-center gap-2 px-3 h-10 rounded-lg border border-slate-200 bg-slate-50 text-slate-800 text-xs font-bold hover:bg-slate-100 transition-colors relative"
             >
               <Filter className="w-3.5 h-3.5 text-brand-navy" />
               <span>Filtros</span>
@@ -153,11 +154,13 @@ export function CatalogHeader({
 
             {/* Sort Selector */}
             <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
-              <span className="hidden sm:inline">Ordenar:</span>
+              <label htmlFor="catalog-sort" className="hidden sm:inline">Ordenar:</label>
               <select
+                id="catalog-sort"
+                aria-label="Ordenar resultados"
                 value={sort}
                 onChange={(e) => onSortChange(e.target.value as SortOption)}
-                className="max-w-[calc(100vw-190px)] sm:max-w-none px-2.5 py-2 rounded-lg border border-slate-200 text-xs font-semibold bg-white text-slate-800 focus:outline-none focus:border-brand-navy cursor-pointer"
+                className="max-w-[calc(100vw-190px)] sm:max-w-none px-2.5 h-10 rounded-lg border border-slate-200 text-xs font-semibold bg-white text-slate-800 focus:outline-none focus:border-brand-navy cursor-pointer"
               >
                 <option value="recent">Más recientes</option>
                 <option value="name-asc">Nombre (A - Z)</option>
@@ -171,10 +174,12 @@ export function CatalogHeader({
             {/* View Mode Toggle (Grid vs List) */}
             <div className="flex items-center border border-slate-200 rounded-lg p-0.5 bg-slate-50">
               <button
+                type="button"
                 onClick={() => onViewModeChange('grid')}
                 aria-label="Vista en cuadrícula"
+                aria-pressed={viewMode === 'grid'}
                 title="Vista en cuadrícula"
-                className={`p-1.5 rounded-md transition-colors ${
+                className={`w-9 h-9 flex items-center justify-center rounded-md transition-colors ${
                   viewMode === 'grid'
                     ? 'bg-white text-brand-navy shadow-2xs font-bold'
                     : 'text-slate-400 hover:text-slate-700'
@@ -183,10 +188,12 @@ export function CatalogHeader({
                 <Grid3x3 className="w-4 h-4" />
               </button>
               <button
+                type="button"
                 onClick={() => onViewModeChange('list')}
                 aria-label="Vista detallada en lista"
+                aria-pressed={viewMode === 'list'}
                 title="Vista técnica en lista"
-                className={`p-1.5 rounded-md transition-colors ${
+                className={`w-9 h-9 flex items-center justify-center rounded-md transition-colors ${
                   viewMode === 'list'
                     ? 'bg-white text-brand-navy shadow-2xs font-bold'
                     : 'text-slate-400 hover:text-slate-700'

@@ -4,6 +4,9 @@ import {
   Globe, Plus, Search, Filter, RefreshCw, CheckCircle2, AlertTriangle, 
   Trash2, Edit, ExternalLink, ShieldCheck, Database, Layers, Check, X, Loader2
 } from 'lucide-react';
+import { useAdminFeedback } from './ui/AdminFeedback';
+import { useModalBehavior } from '../../hooks/useModalBehavior';
+import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 
 interface Source {
   id: number;
@@ -31,9 +34,12 @@ interface SourcesManagerProps {
 }
 
 export const SourcesManager: React.FC<SourcesManagerProps> = ({ user }) => {
+  const { toast, confirm: confirmDialog } = useAdminFeedback();
   const [sources, setSources] = useState<Source[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebouncedValue(search, 350);
+  const [busyId, setBusyId] = useState<number | null>(null);
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [countryFilter, setCountryFilter] = useState('ALL');
   const [sourceTypeFilter, setSourceTypeFilter] = useState('ALL');
@@ -64,7 +70,7 @@ export const SourcesManager: React.FC<SourcesManagerProps> = ({ user }) => {
     try {
       const token = await user.getIdToken();
       const params = new URLSearchParams();
-      if (search) params.set('search', search);
+      if (debouncedSearch) params.set('search', debouncedSearch);
       if (statusFilter !== 'ALL') params.set('status', statusFilter);
       if (countryFilter !== 'ALL') params.set('country', countryFilter);
       if (sourceTypeFilter !== 'ALL') params.set('sourceType', sourceTypeFilter);
@@ -72,12 +78,11 @@ export const SourcesManager: React.FC<SourcesManagerProps> = ({ user }) => {
       const res = await fetch(`/api/admin/sources?${params.toString()}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      if (res.ok) {
-        const data = await res.json();
-        setSources(data);
-      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setSources(await res.json());
     } catch (e) {
       console.error('Error fetching sources:', e);
+      toast.error('No se pudieron cargar las fuentes.');
     } finally {
       setLoading(false);
     }
@@ -85,7 +90,35 @@ export const SourcesManager: React.FC<SourcesManagerProps> = ({ user }) => {
 
   useEffect(() => {
     fetchSources();
-  }, [search, statusFilter, countryFilter, sourceTypeFilter]);
+  }, [debouncedSearch, statusFilter, countryFilter, sourceTypeFilter]);
+
+  const modalRef = React.useRef<HTMLDivElement>(null);
+  useModalBehavior(isModalOpen, () => setIsModalOpen(false), modalRef);
+
+  // POST helper for row actions: busy state per row plus visible result.
+  const runSourceAction = async (id: number, path: string, method: string, fallbackSuccess: string) => {
+    if (busyId !== null) return;
+    setBusyId(id);
+    try {
+      const token = await user.getIdToken();
+      const res = await fetch(`/api/admin/sources/${id}${path}`, {
+        method,
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.success === false) {
+        toast.error(data.error || data.message || `La operación falló (HTTP ${res.status}).`);
+      } else {
+        toast.success(data.message || fallbackSuccess);
+      }
+      fetchSources();
+    } catch (e: any) {
+      console.error(e);
+      toast.error(`Error de conexión: ${e.message}`);
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   const handleOpenCreate = () => {
     setEditingSource(null);
@@ -145,73 +178,37 @@ export const SourcesManager: React.FC<SourcesManagerProps> = ({ user }) => {
       if (res.ok) {
         setIsModalOpen(false);
         fetchSources();
-        setActionMessage(editingSource ? 'Fuente actualizada correctamente' : 'Nueva fuente registrada correctamente');
-        setTimeout(() => setActionMessage(null), 4000);
+        toast.success(editingSource ? 'Fuente actualizada correctamente.' : 'Nueva fuente registrada correctamente.');
       } else {
         const err = await res.json();
-        alert(err.error || 'Error al guardar fuente');
+        toast.error(err.error || 'Error al guardar fuente');
       }
     } catch (e) {
       console.error(e);
-      alert('Error de conexión');
+      toast.error('Error de conexión');
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('¿Está seguro de eliminar o desactivar esta fuente de información?')) return;
-    try {
-      const token = await user.getIdToken();
-      const res = await fetch(`/api/admin/sources/${id}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) {
-        fetchSources();
-        setActionMessage('Fuente eliminada correctamente');
-        setTimeout(() => setActionMessage(null), 4000);
-      }
-    } catch (e) {
-      console.error(e);
-    }
+    if (!(await confirmDialog({ title: '¿Eliminar esta fuente de información?', message: 'Se eliminará de la lista de fuentes de extracción.', confirmLabel: 'Eliminar' }))) return;
+    await runSourceAction(id, '', 'DELETE', 'Fuente eliminada correctamente.');
   };
 
-  const handleCheckSource = async (id: number) => {
-    try {
-      const token = await user.getIdToken();
-      const res = await fetch(`/api/admin/sources/${id}/check`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setActionMessage(data.message);
-        fetchSources();
-        setTimeout(() => setActionMessage(null), 5000);
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  };
+  const handleCheckSource = (id: number) => runSourceAction(id, '/check', 'POST', 'Fuente comprobada.');
 
   const handleExtractSource = async (id: number) => {
-    try {
-      const token = await user.getIdToken();
-      const res = await fetch(`/api/admin/sources/${id}/extract`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setActionMessage(data.message);
-        fetchSources();
-        setTimeout(() => setActionMessage(null), 5000);
-      }
-    } catch (e) {
-      console.error(e);
-    }
+    const ok = await confirmDialog({
+      title: '¿Extraer productos de esta fuente?',
+      message: 'Se visitarán sus URLs y los productos encontrados se guardarán como borradores para revisión. Puede tardar varios minutos.',
+      confirmLabel: 'Extraer',
+      tone: 'primary',
+    });
+    if (!ok) return;
+    await runSourceAction(id, '/extract', 'POST', 'Extracción finalizada.');
   };
+
 
   // Metrics summary
   const totalSources = sources.length;
@@ -403,28 +400,40 @@ export const SourcesManager: React.FC<SourcesManagerProps> = ({ user }) => {
                     </td>
                     <td className="py-4 px-6 text-right space-x-2">
                       <button
+                        type="button"
                         onClick={() => handleCheckSource(src.id)}
+                        disabled={busyId !== null}
+                        aria-label={`Comprobar ${src.domain}`}
                         title="Comprobar fuente técnica"
-                        className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors"
+                        className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors disabled:opacity-50"
                       >
-                        <RefreshCw className="w-3.5 h-3.5" />
+                        <RefreshCw className={`w-3.5 h-3.5 ${busyId === src.id ? 'animate-spin' : ''}`} />
                       </button>
                       <button
+                        type="button"
                         onClick={() => handleExtractSource(src.id)}
+                        disabled={busyId !== null}
+                        aria-label={`Extraer productos de ${src.domain}`}
                         title="Ejecutar extracción de productos"
                         className="p-2 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 transition-colors"
                       >
                         <Database className="w-3.5 h-3.5" />
                       </button>
                       <button
+                        type="button"
                         onClick={() => handleOpenEdit(src)}
+                        disabled={busyId !== null}
+                        aria-label={`Editar ${src.domain}`}
                         title="Editar configuración"
                         className="p-2 rounded-lg bg-cyan-50 hover:bg-cyan-100 text-cyan-800 transition-colors"
                       >
                         <Edit className="w-3.5 h-3.5" />
                       </button>
                       <button
+                        type="button"
                         onClick={() => handleDelete(src.id)}
+                        disabled={busyId !== null}
+                        aria-label={`Eliminar ${src.domain}`}
                         title="Eliminar fuente"
                         className="p-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 transition-colors"
                       >
@@ -441,14 +450,16 @@ export const SourcesManager: React.FC<SourcesManagerProps> = ({ user }) => {
 
       {/* Modal for Create/Edit Source */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full overflow-hidden border border-slate-200 animate-in fade-in zoom-in duration-200">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4" onClick={() => setIsModalOpen(false)}>
+          <div ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="source-modal-title" onClick={(e) => e.stopPropagation()} className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full max-h-[92vh] overflow-y-auto border border-slate-200 animate-in fade-in zoom-in duration-200">
             <div className="px-6 py-5 bg-[#2C3E50] text-white flex items-center justify-between">
-              <h3 className="font-bold text-base flex items-center gap-2">
+              <h3 id="source-modal-title" className="font-bold text-base flex items-center gap-2">
                 <Globe className="w-5 h-5 text-brand-cyan" />
                 {editingSource ? 'Editar Fuente de Información' : 'Registrar Nueva Fuente de Información'}
               </h3>
               <button
+                type="button"
+                aria-label="Cerrar"
                 onClick={() => setIsModalOpen(false)}
                 className="p-1.5 rounded-full hover:bg-white/10 text-slate-300 transition-colors"
               >

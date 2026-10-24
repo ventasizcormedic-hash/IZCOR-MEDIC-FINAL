@@ -29,17 +29,18 @@ export function NotFound() {
         </div>
 
         {/* Text */}
-        <h2 className="text-3xl md:text-4xl font-black text-brand-navy mb-4 tracking-tight">
-          No encontramos productos que coincidan con tu búsqueda
-        </h2>
+        <h1 className="text-3xl md:text-4xl font-black text-brand-navy mb-4 tracking-tight">
+          Página no encontrada
+        </h1>
         <p className="text-lg text-slate-500 mb-10 max-w-lg mx-auto">
-          Revisa la ortografía o intenta con el nombre de la marca o categoría. Si el producto es muy específico, podemos cotizarlo e importarlo para ti.
+          La dirección que abriste no existe o fue movida. Busca el producto que necesitas o explora el catálogo. Si es muy específico, podemos cotizarlo e importarlo para ti.
         </p>
 
         {/* Search */}
         <form onSubmit={handleSearch} className="max-w-md mx-auto mb-10 relative">
           <input
-            type="text"
+            type="search"
+            aria-label="Buscar producto, marca o modelo"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Buscar otro producto, marca o modelo..."
@@ -47,6 +48,7 @@ export function NotFound() {
           />
           <button 
             type="submit"
+            aria-label="Buscar"
             className="absolute right-2 top-2 bottom-2 aspect-square bg-brand-navy hover:bg-brand-navy-light text-white rounded-lg flex items-center justify-center transition-colors"
           >
             <Search className="w-5 h-5" />

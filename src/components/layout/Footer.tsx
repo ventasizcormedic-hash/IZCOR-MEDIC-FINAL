@@ -91,6 +91,16 @@ export function Footer() {
                 </Link>
               </li>
               <li>
+                <Link to="/marcas" className="text-slate-300 hover:text-white transition-colors focus-visible:outline-none focus-visible:text-cyan-300">
+                  Marcas
+                </Link>
+              </li>
+              <li>
+                <Link to="/fabricantes" className="text-slate-300 hover:text-white transition-colors focus-visible:outline-none focus-visible:text-cyan-300">
+                  Fabricantes
+                </Link>
+              </li>
+              <li>
                 <Link to="/nosotros" className="text-slate-300 hover:text-white transition-colors focus-visible:outline-none focus-visible:text-cyan-300">
                   Nosotros
                 </Link>
@@ -193,7 +203,7 @@ export function Footer() {
                 Conforme a la Ley 29571 (Código de Protección al Consumidor), tienes derecho a registrar tu reclamo o queja.
               </p>
               <Link
-                to="/contacto"
+                to="/contacto?asunto=reclamo"
                 className="inline-flex items-center gap-1.5 w-full justify-center py-2 px-3 rounded-lg bg-red-700 hover:bg-red-600 text-white font-bold text-[10px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
                 aria-label="Registrar una queja o reclamo"
               >

@@ -1,28 +1,29 @@
 import { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 
+const logEvent = (message: string, params?: Record<string, any>) => {
+  // Only log in development until a real provider (GTM/GA4) is connected.
+  if (import.meta.env.DEV) console.log(`[Analytics] ${message}`, params ?? '');
+  // dataLayer.push({ event: eventName, ...eventParams });
+};
+
+/** Tracks one page view per route change. Mount once, in the public layout. */
+export function usePageViewTracking() {
+  const location = useLocation();
+
+  useEffect(() => {
+    logEvent(`page_view: ${location.pathname + location.search}`);
+  }, [location]);
+}
+
 /**
  * Sistema básico de analítica en cliente (Memoria del sistema).
  * Preparado para conectar con GTM, GA4 o backend propio en el futuro.
  */
 export function useAnalytics() {
-  const location = useLocation();
-
-  useEffect(() => {
-    // 1. Page View Tracking
-    const trackPageView = () => {
-      const pagePath = location.pathname + location.search;
-      console.log(`[Analytics] page_view: ${pagePath}`);
-      // dataLayer.push({ event: 'page_view', page_path: pagePath });
-    };
-
-    trackPageView();
-  }, [location]);
-
   // Funciones específicas para eventos de producto y negocio
   const trackEvent = (eventName: string, eventParams: Record<string, any> = {}) => {
-    console.log(`[Analytics] ${eventName}:`, eventParams);
-    // dataLayer.push({ event: eventName, ...eventParams });
+    logEvent(eventName, eventParams);
   };
 
   const trackProductView = (productData: { id: number; name: string; brand: string; category: string }) => {

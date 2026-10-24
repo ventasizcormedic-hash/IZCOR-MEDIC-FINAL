@@ -4,20 +4,22 @@ import {
   Activity, Server, Database, Cpu, Layers, RefreshCw, 
   Play, CheckCircle2, AlertTriangle, XCircle, Clock, ShieldCheck, Zap
 } from 'lucide-react';
+import { useAdminFeedback } from './ui/AdminFeedback';
 
 interface SystemHealthManagerProps {
   user: User | null;
 }
 
 export function SystemHealthManager({ user }: SystemHealthManagerProps) {
+  const { toast, confirm: confirmDialog } = useAdminFeedback();
   const [healthData, setHealthData] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
   const [creatingJob, setCreatingJob] = useState(false);
   const [message, setMessage] = useState('');
 
-  const fetchHealth = async () => {
+  const fetchHealth = async (silent = false) => {
     if (!user) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
     try {
       const token = await user.getIdToken();
       const res = await fetch('/api/admin/system-health', {
@@ -36,12 +38,19 @@ export function SystemHealthManager({ user }: SystemHealthManagerProps) {
 
   useEffect(() => {
     fetchHealth();
-    const interval = setInterval(fetchHealth, 10000); // Poll every 10s for live worker progress
+    const interval = setInterval(() => fetchHealth(true), 10000); // Poll every 10s for live worker progress (no spinner)
     return () => clearInterval(interval);
   }, [user]);
 
   const handleStartJob = async (jobType: string) => {
     if (!user) return;
+    const ok = await confirmDialog({
+      title: `¿Encolar el trabajo ${jobType}?`,
+      message: 'Se ejecutará en segundo plano sobre el catálogo.',
+      confirmLabel: 'Encolar',
+      tone: 'primary',
+    });
+    if (!ok) return;
     setCreatingJob(true);
     setMessage('');
     try {
@@ -57,13 +66,16 @@ export function SystemHealthManager({ user }: SystemHealthManagerProps) {
       const data = await res.json();
       if (res.ok) {
         setMessage(`Job ${jobType} encolado correctamente con ID #${data.job.id}`);
+        toast.success(`Job ${jobType} encolado (#${data.job.id}).`);
         fetchHealth();
       } else {
         setMessage('Error al encolar job.');
+        toast.error(data.error || 'Error al encolar job.');
       }
     } catch (e) {
       console.error(e);
       setMessage('Error de red al crear job.');
+      toast.error('Error de red al crear job.');
     } finally {
       setCreatingJob(false);
     }
@@ -83,7 +95,7 @@ export function SystemHealthManager({ user }: SystemHealthManagerProps) {
           </p>
         </div>
         <button
-          onClick={fetchHealth}
+          onClick={() => fetchHealth()}
           className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-2 transition-colors shadow-sm"
         >
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Actualizar Métricas
@@ -115,7 +127,11 @@ export function SystemHealthManager({ user }: SystemHealthManagerProps) {
         </div>
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-1">
           <span className="text-[10px] font-bold uppercase text-cyan-700">Conexiones DB Pool</span>
-          <p className="text-2xl font-black text-cyan-700">{healthData?.poolConnections || 12} / {healthData?.maxPool || 100}</p>
+          <p className="text-2xl font-black text-cyan-700">
+            {healthData?.poolConnections != null
+              ? `${healthData.poolConnections} / ${healthData.maxPool ?? '—'}`
+              : healthData?.databaseEngine === 'pglite' ? 'PGlite (sin pool)' : '—'}
+          </p>
           <span className="text-[10px] text-emerald-600 font-bold">Saludable ({healthData?.databaseStatus || 'CONNECTED'})</span>
         </div>
       </div>
@@ -182,7 +198,7 @@ export function SystemHealthManager({ user }: SystemHealthManagerProps) {
                       <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
                         j.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-800' :
                         j.status === 'RUNNING' ? 'bg-cyan-100 text-cyan-900 animate-pulse' :
-                        j.status === 'QUEUED' ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-800'
+                        j.status === 'QUEUED' || j.status === 'COMPLETED_WITH_WARNINGS' ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-800'
                       }`}>
                         {j.status}
                       </span>

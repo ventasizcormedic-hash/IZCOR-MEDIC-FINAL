@@ -31,6 +31,7 @@ interface Product {
 }
 
 import { SeoHead } from '../components/seo/SeoHead';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 
 export function CategoryDetail() {
   const { slug } = useParams<{ slug: string }>();
@@ -54,7 +55,7 @@ export function CategoryDetail() {
   const [products, setProducts] = useState<Product[]>([]);
   const [productsLoading, setProductsLoading] = useState(false);
   
-  const page = parseInt(searchParams.get('page') || '1');
+  const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10) || 1);
   const sort = searchParams.get('sort') || 'recent';
   const q = searchParams.get('q') || '';
   const filterBrand = searchParams.get('brand') || '';
@@ -128,7 +129,7 @@ export function CategoryDetail() {
     }
   };
 
-  const updateFilters = (key: string, value: string) => {
+  const updateFilters = (key: string, value: string, replace = false) => {
     const newParams = new URLSearchParams(searchParams);
     if (value) {
       newParams.set(key, value);
@@ -136,9 +137,20 @@ export function CategoryDetail() {
       newParams.delete(key);
     }
     // Reset to page 1 on filter change
-    newParams.set('page', '1');
-    navigate(`${location.pathname}?${newParams.toString()}`);
+    newParams.delete('page');
+    navigate(`${location.pathname}?${newParams.toString()}`, { replace });
   };
+
+  // Typing updates a local value; the URL (and the fetch) follow after a pause,
+  // replacing the history entry instead of adding one per keystroke.
+  const [searchInput, setSearchInput] = useState(q);
+  const debouncedSearchInput = useDebouncedValue(searchInput, 350);
+  useEffect(() => {
+    if (debouncedSearchInput !== q) updateFilters('q', debouncedSearchInput, true);
+  }, [debouncedSearchInput]);
+  useEffect(() => {
+    if (q !== debouncedSearchInput) setSearchInput(q);
+  }, [q]);
 
   const clearFilters = () => {
     navigate(location.pathname);
@@ -308,14 +320,15 @@ export function CategoryDetail() {
 
               {/* Search within category */}
               <div className="mb-6">
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Buscar en {category.name}</label>
+                <label htmlFor="category-search" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Buscar en {category.name}</label>
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                   <input 
-                    type="text" 
+                    id="category-search"
+                    type="search" 
                     placeholder="Ej. modelo o palabra clave..." 
-                    value={q}
-                    onChange={(e) => updateFilters('q', e.target.value)}
+                    value={searchInput}
+                    onChange={(e) => setSearchInput(e.target.value)}
                     className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-indigo-500 transition-all outline-none"
                   />
                 </div>

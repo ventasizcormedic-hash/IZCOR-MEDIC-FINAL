@@ -48,7 +48,7 @@ export function ProductCard({
   onToggleCompare,
 }: ProductCardProps) {
   const [imageError, setImageError] = useState(false);
-  const { addItem, isInTray, justAddedId } = useQuote();
+  const { addItem, isInTray, justAddedId, openTray } = useQuote();
 
   const displayBrand = brandName?.trim() || 'IZCOR MEDIC';
   const displayManufacturer = manufacturer?.trim() || null;
@@ -81,6 +81,11 @@ export function ProductCard({
   const handleAddToQuote = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    // Already in the tray: show it instead of silently adding one more unit.
+    if (inTray) {
+      openTray();
+      return;
+    }
     addItem({
       id,
       name,
@@ -128,7 +133,7 @@ export function ProductCard({
       {/* Real Product Photography Canvas */}
       <div className="relative aspect-[4/3] bg-gradient-to-b from-slate-50/70 to-slate-100/40 flex items-center justify-center overflow-hidden border-b border-slate-100/80">
         <Link 
-          to={`/productos/${slug}`}
+          to={`/producto/${slug}`}
           className="w-full h-full flex items-center justify-center"
           aria-label={`Ver ficha de ${name}`}
         >
@@ -235,7 +240,7 @@ export function ProductCard({
 
           {/* Product Title */}
           <h3 className="font-bold text-slate-900 text-sm md:text-base leading-snug line-clamp-2 group-hover:text-cyan-800 transition-colors mb-1.5 font-heading">
-            <Link to={`/productos/${slug}`}>
+            <Link to={`/producto/${slug}`}>
               {name}
             </Link>
           </h3>
@@ -299,7 +304,7 @@ export function ProductCard({
         <div className="grid grid-cols-2 gap-2 pt-1">
           {/* Secondary Action: Ver Ficha Técnica */}
           <Link
-            to={`/productos/${slug}`}
+            to={`/producto/${slug}`}
             id={`btn-view-${id}`}
             className="inline-flex items-center justify-center gap-1.5 h-9.5 px-3 rounded-xl text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 hover:text-[#2C3E50] active:scale-[0.98] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 font-heading"
             title={`Ver ficha técnica de ${name}`}
@@ -320,7 +325,7 @@ export function ProductCard({
                 ? 'bg-cyan-800 text-white hover:bg-cyan-900'
                 : 'bg-[#00B9D8] hover:bg-[#00a2be] active:bg-[#008fa8] text-[#0D2232] font-black shadow-xs hover:shadow'
             }`}
-            title={`Agregar ${name} a la bandeja de cotización`}
+            title={inTray ? 'Ver bandeja de cotización' : `Agregar ${name} a la bandeja de cotización`}
           >
             {wasJustAdded ? (
               <>

@@ -7,10 +7,18 @@ import {
 } from 'lucide-react';
 import { Logo } from '../Logo';
 import { HeaderSearchModal } from './HeaderSearchModal';
-import { CatalogMegaMenu, ManufacturersDropdown, UserPortalDropdown } from './HeaderDropdowns';
+import { CatalogMegaMenu, ManufacturersDropdown } from './HeaderDropdowns';
 import { MobileNavDrawer } from './MobileNavDrawer';
 import { MiniCartTray } from './MiniCartTray';
 import { useQuote } from '../../context/QuoteContext';
+import { useComparison } from '../../hooks/useComparison';
+
+// Hover-to-open menus only make sense with a real mouse; on touch they fight with taps.
+const canHover = () =>
+  typeof window !== 'undefined' && window.matchMedia?.('(hover: hover) and (pointer: fine)').matches;
+
+const isApplePlatform = () =>
+  typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
 
 export function Header() {
   const [scrolled, setScrolled] = useState(false);
@@ -18,17 +26,30 @@ export function Header() {
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [catalogMenuOpen, setCatalogMenuOpen] = useState(false);
   const [mfgMenuOpen, setMfgMenuOpen] = useState(false);
-  const [userPortalOpen, setUserPortalOpen] = useState(false);
-  const [cartTrayOpen, setCartTrayOpen] = useState(false);
-  const [compareCount, setCompareCount] = useState(0);
+  const { list: comparisonList } = useComparison();
+  const compareCount = comparisonList.length;
+  const shortcutLabel = isApplePlatform() ? '⌘K' : 'Ctrl K';
 
-  const { itemCount, justAddedId } = useQuote();
+  // Tray state lives in QuoteContext so product cards can open it too.
+  const { itemCount, justAddedId, isTrayOpen: cartTrayOpen, openTray, closeTray, toggleTray } = useQuote();
+  const setCartTrayOpen = (open: boolean) => (open ? openTray() : closeTray());
   const location = useLocation();
 
   const catalogMenuTimerRef = useRef<NodeJS.Timeout | null>(null);
   const mfgMenuTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const userPortalTimerRef = useRef<NodeJS.Timeout | null>(null);
   const cartTrayTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Expose the sticky header height so sticky page elements can sit right below it.
+  const headerRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const update = () => document.documentElement.style.setProperty('--site-header-height', `${el.offsetHeight}px`);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   // Scroll listener
   useEffect(() => {
@@ -57,34 +78,8 @@ export function Header() {
     setSearchModalOpen(false);
     setCatalogMenuOpen(false);
     setMfgMenuOpen(false);
-    setUserPortalOpen(false);
     setCartTrayOpen(false);
   }, [location.pathname]);
-
-  // Read and listen to comparison list
-  const updateCompareCount = () => {
-    try {
-      const saved = localStorage.getItem('izcor_product_comparison');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        setCompareCount(Array.isArray(parsed) ? parsed.length : 0);
-      } else {
-        setCompareCount(0);
-      }
-    } catch {
-      setCompareCount(0);
-    }
-  };
-
-  useEffect(() => {
-    updateCompareCount();
-    window.addEventListener('storage', updateCompareCount);
-    const interval = setInterval(updateCompareCount, 2000);
-    return () => {
-      window.removeEventListener('storage', updateCompareCount);
-      clearInterval(interval);
-    };
-  }, []);
 
   // Route active checkers
   const isHomeActive = location.pathname === '/';
@@ -93,23 +88,38 @@ export function Header() {
     location.pathname.startsWith('/productos') || 
     location.pathname.startsWith('/producto/') || 
     location.pathname.startsWith('/categorias/');
+  const isBrandsActive = location.pathname.startsWith('/marcas') || location.pathname.startsWith('/fabricantes');
   const isNewsActive = location.pathname === '/noticias';
   const isContactActive = location.pathname === '/contacto';
 
   // Hover handlers with grace delay
   const handleCatalogEnter = () => {
+    if (!canHover()) return;
     if (catalogMenuTimerRef.current) clearTimeout(catalogMenuTimerRef.current);
     setCatalogMenuOpen(true);
   };
   const handleCatalogLeave = () => {
+    if (!canHover()) return;
     catalogMenuTimerRef.current = setTimeout(() => setCatalogMenuOpen(false), 150);
   };
 
+  const handleMfgEnter = () => {
+    if (!canHover()) return;
+    if (mfgMenuTimerRef.current) clearTimeout(mfgMenuTimerRef.current);
+    setMfgMenuOpen(true);
+  };
+  const handleMfgLeave = () => {
+    if (!canHover()) return;
+    mfgMenuTimerRef.current = setTimeout(() => setMfgMenuOpen(false), 150);
+  };
+
   const handleCartEnter = () => {
+    if (!canHover()) return;
     if (cartTrayTimerRef.current) clearTimeout(cartTrayTimerRef.current);
     setCartTrayOpen(true);
   };
   const handleCartLeave = () => {
+    if (!canHover()) return;
     cartTrayTimerRef.current = setTimeout(() => setCartTrayOpen(false), 200);
   };
 
@@ -166,6 +176,7 @@ export function Header() {
 
       {/* 2. STICKY HEADER */}
       <header 
+        ref={headerRef}
         id="main-sticky-header"
         className={`sticky top-0 left-0 right-0 z-40 w-full transition-all duration-250 ${
           scrolled 
@@ -187,7 +198,7 @@ export function Header() {
                 <Logo className="h-9 md:h-11" />
               </Link>
 
-              <div className="header-brand-shell hidden sm:flex items-center rounded-full px-3 py-1.5">
+              <div className="header-brand-shell hidden sm:flex xl:hidden items-center rounded-full px-3 py-1.5">
                 <div className="brand-lockup-mark text-left">
                   <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[#20384D]">IZCOR MEDIC</p>
                   <p className="text-[9px] font-semibold tracking-[0.14em] uppercase text-slate-500">Instituciones de salud</p>
@@ -205,7 +216,7 @@ export function Header() {
               <Link
                 to="/"
                 id="nav-link-inicio"
-                className={`px-3.5 py-2 rounded-xl text-[11px] sm:text-xs font-black tracking-[0.14em] uppercase transition-all duration-200 relative ${
+                className={`px-2.5 py-2 rounded-xl text-[11px] sm:text-xs font-black tracking-[0.1em] uppercase transition-all duration-200 relative ${
                   isHomeActive 
                     ? 'text-[#2C3E50] bg-slate-100/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]' 
                     : 'text-[#2C3E50]/75 hover:text-cyan-700 hover:bg-slate-50'
@@ -213,7 +224,7 @@ export function Header() {
               >
                 <span>Inicio</span>
                 {isHomeActive && (
-                  <span className="absolute bottom-1 left-3.5 right-3.5 h-0.5 bg-brand-cyan rounded-full" />
+                  <span className="absolute bottom-1 left-2.5 right-2.5 h-0.5 bg-brand-cyan rounded-full" />
                 )}
               </Link>
 
@@ -221,7 +232,7 @@ export function Header() {
               <Link
                 to="/nosotros"
                 id="nav-link-nosotros"
-                className={`px-3.5 py-2 rounded-xl text-[11px] sm:text-xs font-black tracking-[0.14em] uppercase transition-all duration-200 relative ${
+                className={`px-2.5 py-2 rounded-xl text-[11px] sm:text-xs font-black tracking-[0.1em] uppercase transition-all duration-200 relative ${
                   isAboutActive 
                     ? 'text-[#2C3E50] bg-slate-100/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]' 
                     : 'text-[#2C3E50]/75 hover:text-cyan-700 hover:bg-slate-50'
@@ -229,7 +240,7 @@ export function Header() {
               >
                 <span>Nosotros</span>
                 {isAboutActive && (
-                  <span className="absolute bottom-1 left-3.5 right-3.5 h-0.5 bg-brand-cyan rounded-full" />
+                  <span className="absolute bottom-1 left-2.5 right-2.5 h-0.5 bg-brand-cyan rounded-full" />
                 )}
               </Link>
 
@@ -242,7 +253,7 @@ export function Header() {
                 <Link
                   to="/productos"
                   id="nav-link-catalogo"
-                  className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[11px] sm:text-xs font-black tracking-[0.14em] uppercase transition-all duration-200 relative ${
+                  className={`inline-flex items-center gap-1 px-2.5 py-2 rounded-xl text-[11px] sm:text-xs font-black tracking-[0.1em] uppercase transition-all duration-200 relative ${
                     isCatalogActive 
                       ? 'text-[#2C3E50] bg-slate-100/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]' 
                       : 'text-[#2C3E50]/75 hover:text-cyan-700 hover:bg-slate-50'
@@ -254,7 +265,7 @@ export function Header() {
                   <span>Catálogo</span>
                   <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${catalogMenuOpen ? 'rotate-180 text-cyan-700' : 'text-slate-400'}`} />
                   {isCatalogActive && (
-                    <span className="absolute bottom-1 left-3.5 right-3.5 h-0.5 bg-brand-cyan rounded-full" />
+                    <span className="absolute bottom-1 left-2.5 right-2.5 h-0.5 bg-brand-cyan rounded-full" />
                   )}
                 </Link>
 
@@ -264,11 +275,41 @@ export function Header() {
                 />
               </div>
 
-              {/* 4. Noticias */}
+              {/* 4. Marcas y Fabricantes */}
+              <div
+                className="relative"
+                onMouseEnter={handleMfgEnter}
+                onMouseLeave={handleMfgLeave}
+              >
+                <Link
+                  to="/marcas"
+                  id="nav-link-marcas"
+                  className={`inline-flex items-center gap-1 px-2.5 py-2 rounded-xl text-[11px] sm:text-xs font-black tracking-[0.1em] uppercase transition-all duration-200 relative ${
+                    isBrandsActive
+                      ? 'text-[#2C3E50] bg-slate-100/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]'
+                      : 'text-[#2C3E50]/75 hover:text-cyan-700 hover:bg-slate-50'
+                  }`}
+                  aria-expanded={mfgMenuOpen}
+                  aria-haspopup="true"
+                >
+                  <span>Marcas</span>
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${mfgMenuOpen ? 'rotate-180 text-cyan-700' : 'text-slate-400'}`} />
+                  {isBrandsActive && (
+                    <span className="absolute bottom-1 left-2.5 right-2.5 h-0.5 bg-brand-cyan rounded-full" />
+                  )}
+                </Link>
+
+                <ManufacturersDropdown
+                  isOpen={mfgMenuOpen}
+                  onClose={() => setMfgMenuOpen(false)}
+                />
+              </div>
+
+              {/* 5. Noticias */}
               <Link
                 to="/noticias"
                 id="nav-link-noticias"
-                className={`px-3.5 py-2 rounded-xl text-[11px] sm:text-xs font-black tracking-[0.14em] uppercase transition-all duration-200 relative ${
+                className={`px-2.5 py-2 rounded-xl text-[11px] sm:text-xs font-black tracking-[0.1em] uppercase transition-all duration-200 relative ${
                   isNewsActive 
                     ? 'text-[#2C3E50] bg-slate-100/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]' 
                     : 'text-[#2C3E50]/75 hover:text-cyan-700 hover:bg-slate-50'
@@ -276,15 +317,15 @@ export function Header() {
               >
                 <span>Noticias</span>
                 {isNewsActive && (
-                  <span className="absolute bottom-1 left-3.5 right-3.5 h-0.5 bg-brand-cyan rounded-full" />
+                  <span className="absolute bottom-1 left-2.5 right-2.5 h-0.5 bg-brand-cyan rounded-full" />
                 )}
               </Link>
 
-              {/* 5. Contáctanos */}
+              {/* 6. Contáctanos */}
               <Link
                 to="/contacto"
                 id="nav-link-contacto"
-                className={`px-3.5 py-2 rounded-xl text-[11px] sm:text-xs font-black tracking-[0.14em] uppercase transition-all duration-200 relative ${
+                className={`px-2.5 py-2 rounded-xl text-[11px] sm:text-xs font-black tracking-[0.1em] uppercase transition-all duration-200 relative ${
                   isContactActive 
                     ? 'text-[#2C3E50] bg-slate-100/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]' 
                     : 'text-[#2C3E50]/75 hover:text-cyan-700 hover:bg-slate-50'
@@ -292,7 +333,7 @@ export function Header() {
               >
                 <span>Contáctanos</span>
                 {isContactActive && (
-                  <span className="absolute bottom-1 left-3.5 right-3.5 h-0.5 bg-brand-cyan rounded-full" />
+                  <span className="absolute bottom-1 left-2.5 right-2.5 h-0.5 bg-brand-cyan rounded-full" />
                 )}
               </Link>
             </nav>
@@ -306,22 +347,23 @@ export function Header() {
                 id="header-search-btn"
                 onClick={() => setSearchModalOpen(true)}
                 className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium text-slate-500 bg-slate-100/90 hover:bg-slate-200/70 border border-slate-200/80 rounded-full transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-cyan cursor-pointer"
-                title="Buscar en catálogo médico (Ctrl+K)"
+                title={`Buscar en catálogo médico (${shortcutLabel})`}
                 aria-label="Abrir buscador"
               >
                 <Search className="w-3.5 h-3.5 text-slate-500" />
-                <span className="hidden xl:inline text-slate-500 font-sans">Buscar equipos o insumos...</span>
-                <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono text-slate-400 bg-white border border-slate-200 rounded-full">
-                  ⌘K
+                <span className="sr-only">Buscar equipos o insumos</span>
+                <kbd className="hidden lg:inline-flex items-center whitespace-nowrap px-1.5 py-0.5 text-[10px] font-mono text-slate-400 bg-white border border-slate-200 rounded-full">
+                  {shortcutLabel}
                 </kbd>
               </button>
 
               {/* Comparador Shortcut */}
               <Link
-                to="/productos"
+                to="/productos?compare=1"
                 id="header-compare-link"
-                className="hidden sm:inline-flex items-center justify-center relative p-2 text-slate-600 hover:text-[#2C3E50] hover:bg-slate-100 rounded-xl transition-colors"
+                className="hidden sm:inline-flex items-center justify-center relative p-2.5 text-slate-600 hover:text-[#2C3E50] hover:bg-slate-100 rounded-xl transition-colors"
                 title={compareCount > 0 ? `${compareCount} equipos en comparación` : "Matriz de comparación"}
+                aria-label={compareCount > 0 ? `Abrir comparación de ${compareCount} equipos` : 'Comparador de equipos'}
               >
                 <Scale className="w-4 h-4" />
                 {compareCount > 0 && (
@@ -340,7 +382,9 @@ export function Header() {
                 <button
                   type="button"
                   id="header-quote-cart-btn"
-                  onClick={() => setCartTrayOpen(!cartTrayOpen)}
+                  onClick={toggleTray}
+                  aria-expanded={cartTrayOpen}
+                  aria-controls="mini-cart-tray"
                   className={`relative p-2.5 rounded-xl border transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-cyan ${
                     itemCount > 0 
                       ? 'bg-cyan-50 border-cyan-200 text-cyan-800 hover:bg-cyan-100' 

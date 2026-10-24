@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 
 export interface QuoteTrayItem {
   id: number;
@@ -24,7 +24,7 @@ interface QuoteContextType {
     imageUrl?: string | null;
     slug?: string;
     categoryName?: string | null;
-  }) => void;
+  }, options?: { ifMissing?: boolean }) => void;
   removeItem: (id: number) => void;
   updateQuantity: (id: number, delta: number) => void;
   clearTray: () => void;
@@ -50,6 +50,11 @@ export function QuoteProvider({ children }: { children: ReactNode }) {
 
   const [isTrayOpen, setIsTrayOpen] = useState(false);
   const [justAddedId, setJustAddedId] = useState<number | null>(null);
+  const justAddedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (justAddedTimer.current) clearTimeout(justAddedTimer.current);
+  }, []);
 
   useEffect(() => {
     try {
@@ -69,12 +74,15 @@ export function QuoteProvider({ children }: { children: ReactNode }) {
     imageUrl?: string | null;
     slug?: string;
     categoryName?: string | null;
-  }) => {
+  }, options?: { ifMissing?: boolean }) => {
     setJustAddedId(product.id);
-    setTimeout(() => setJustAddedId(null), 2000);
+    if (justAddedTimer.current) clearTimeout(justAddedTimer.current);
+    justAddedTimer.current = setTimeout(() => setJustAddedId(null), 2000);
 
     setItems((prev) => {
       const existing = prev.find((item) => item.id === product.id);
+      // ifMissing: links like /cotizar?product=ID must not add a second unit.
+      if (existing && options?.ifMissing) return prev;
       if (existing) {
         return prev.map((item) =>
           item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item

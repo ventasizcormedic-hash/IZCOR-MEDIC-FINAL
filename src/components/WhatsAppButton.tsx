@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useLocation } from 'react-router-dom';
+import { useComparison } from '../hooks/useComparison';
 
 function WhatsAppIcon() {
   return (
@@ -19,12 +21,19 @@ export function WhatsAppButton() {
   const [showTooltip, setShowTooltip] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
 
+  const { pathname } = useLocation();
+  const { list: comparisonList } = useComparison();
+
   useEffect(() => {
     const timer = setTimeout(() => setIsVisible(true), 1500);
     return () => clearTimeout(timer);
   }, []);
 
-  if (!isVisible) return null;
+  // Product pages already show WhatsApp in their action bar, and the catalog's
+  // comparison dock sits in the same corner: don't stack the floating button on top.
+  const isProductPage = /^\/productos?\/[^/]+/.test(pathname);
+  const comparisonDockVisible = pathname === '/productos' && comparisonList.length > 0;
+  if (!isVisible || isProductPage || comparisonDockVisible) return null;
 
   return (
     <div className="fixed bottom-[max(1.5rem,env(safe-area-inset-bottom))] right-[max(1rem,env(safe-area-inset-right))] z-50 flex items-center gap-4 sm:right-6">
@@ -34,7 +43,7 @@ export function WhatsAppButton() {
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: 10 }}
-            className="bg-white px-4 py-3 rounded-lg shadow-xl border border-slate-100 hidden sm:block"
+            className="relative bg-white px-4 py-3 rounded-lg shadow-xl border border-slate-100 hidden sm:block"
           >
             <p className="text-sm font-bold text-brand-navy mb-0.5">¿Necesitas ayuda?</p>
             <p className="text-xs text-slate-500">Escríbenos por WhatsApp</p>

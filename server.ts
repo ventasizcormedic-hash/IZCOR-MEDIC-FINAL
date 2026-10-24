@@ -3,10 +3,10 @@ import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "node:url";
 import { createServer as createViteServer } from "vite";
-import { requireAuth, AuthRequest } from "./src/middleware/auth.ts";
+import { requireAuth, requireAdmin, resolveUserRole, ADMIN_ROLES, AuthRequest } from "./src/middleware/auth.ts";
 import { db, initDatabase } from "./src/db/index.ts";
-import { brands, categories, products, quoteItems, quotes, tdrRequests, pharmacovigilanceReports, productImages, productDocuments, sources, scraperUrls, scrapingJobs, draftProducts, duplicateCases, productMergeHistory, backgroundJobs, sourceCandidates, users, autonomousSettings, autonomousAuditLogs, productVersions } from "./src/db/schema.ts";
-import { eq, ilike, or, and, desc, asc, sql, inArray, gte } from "drizzle-orm";
+import { brands, categories, products, quoteItems, quotes, tdrRequests, tdrFiles, pharmacovigilanceReports, productImages, productDocuments, sources, scraperUrls, scrapingJobs, draftProducts, duplicateCases, productMergeHistory, backgroundJobs, sourceCandidates, users, autonomousSettings, autonomousAuditLogs, productVersions } from "./src/db/schema.ts";
+import { eq, ilike, or, and, desc, asc, sql, inArray, gte, type SQL } from "drizzle-orm";
 import { getOrCreateUser } from "./src/db/users.ts";
 import { catalogConsolidationService } from "./src/services/catalogConsolidationService.ts";
 import { normalizationService } from "./src/services/normalizationService.ts";
@@ -32,17 +32,36 @@ const projectRoot = (() => {
 
 process.chdir(projectRoot);
 
+// URL slug that keeps Spanish words readable: "Diagnóstico" -> "diagnostico" (not "diagn-stico").
+const slugify = (value: string) =>
+  value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)+/g, '');
+
+const TDR_MAX_FILE_BYTES = 10 * 1024 * 1024;
+
+// Canonical public URL for robots/sitemap: APP_URL when set, else the request host.
+const publicBaseUrl = (req: express.Request) =>
+  (process.env.APP_URL || `${req.protocol}://${req.get("host")}`).replace(/\/+$/, '');
+
 async function startServer() {
   // Initialize database engine (PostgreSQL or PGlite) and auto-seed if required
   await initDatabase();
 
   // Boot high-performance indexes on database startup
-  initializeDatabaseIndexes().catch(err => console.warn("Index init note:", err?.message || err));
+  // Awaited: it also creates tables (tdr_files, pharmacovigilance_reports) the routes need.
+  await initializeDatabaseIndexes().catch(err => console.warn("Index init note:", err?.message || err));
 
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
 
   app.disable('x-powered-by');
+  // Behind a load balancer / Cloud Run: trust X-Forwarded-* for protocol and client IP.
+  app.set('trust proxy', 1);
+  const isProductionEnv = process.env.NODE_ENV === 'production';
 
   // Security headers for production
   app.use((req, res, next) => {
@@ -51,6 +70,9 @@ async function startServer() {
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     res.setHeader('X-XSS-Protection', '1; mode=block');
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    if (isProductionEnv && req.secure) {
+      res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    }
 
     if (req.path.startsWith('/api/')) {
       res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
@@ -65,7 +87,10 @@ async function startServer() {
 
   // Performance: HTTP Compression (Gzip / Deflate)
   app.use(compression());
-  app.use(express.json({ limit: '50mb' }));
+  // Admin bulk imports send large chunks; public endpoints get a tighter limit
+  // (a 10MB TDR file is ~13.4MB once base64-encoded).
+  app.use('/api/admin', express.json({ limit: '50mb' }));
+  app.use(express.json({ limit: '15mb' }));
 
   // Global Performance Telemetry Middleware
   app.use((req, res, next) => {
@@ -77,6 +102,32 @@ async function startServer() {
     next();
   });
 
+  // Simple in-memory rate limit for public form/AI endpoints (per client IP).
+  const rateLimit = (max: number, windowMs: number) => {
+    const hits = new Map<string, number[]>();
+    return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+      // baseUrl + path: under app.use(prefix) req.path alone loses the endpoint name.
+      const key = `${req.ip}|${req.baseUrl}${req.path}`;
+      const now = Date.now();
+      const recent = (hits.get(key) || []).filter(t => now - t < windowMs);
+      if (recent.length >= max) {
+        res.setHeader('Retry-After', String(Math.ceil((windowMs - (now - recent[0])) / 1000)));
+        return res.status(429).json({ error: "Demasiadas solicitudes seguidas. Espere unos minutos e intente nuevamente o escríbanos por WhatsApp." });
+      }
+      recent.push(now);
+      hits.set(key, recent);
+      if (hits.size > 5000) {
+        for (const [k, times] of hits) if (!times.some(t => now - t < windowMs)) hits.delete(k);
+      }
+      next();
+    };
+  };
+  // Generous enough for a hospital network sharing one public IP.
+  const formLimiter = rateLimit(20, 15 * 60 * 1000);
+  app.use(['/api/quotes', '/api/contact', '/api/tdr', '/api/pharmacovigilance'], (req, res, next) =>
+    req.method === 'POST' ? formLimiter(req, res, next) : next());
+  app.use('/api/ai/analyze-tdr', rateLimit(5, 15 * 60 * 1000));
+
   // API Routes
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
@@ -87,7 +138,33 @@ async function startServer() {
   if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
   }
+  // TDR documents are private client files: never serve them statically.
+  app.use('/uploads/tdr', (req, res) => res.status(404).end());
   app.use('/uploads', express.static(uploadsDir));
+
+  // Checks that a URL answers (HEAD, falling back to GET) within a few seconds.
+  const probeUrl = async (url: string): Promise<{ ok: boolean; status?: number; error?: string }> => {
+    if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+    const attempt = async (method: 'HEAD' | 'GET') => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8000);
+      try {
+        return await fetch(url, { method, redirect: 'follow', signal: controller.signal, headers: { 'User-Agent': 'Mozilla/5.0 (IZCOR MEDIC link check)' } });
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+    try {
+      let response = await attempt('HEAD');
+      if (response.status === 405 || response.status === 403 || response.status === 501) response = await attempt('GET');
+      return response.ok ? { ok: true, status: response.status } : { ok: false, status: response.status, error: `HTTP ${response.status}` };
+    } catch (e: any) {
+      return { ok: false, error: e.name === 'AbortError' ? 'tiempo de espera agotado' : (e.cause?.code || e.message) };
+    }
+  };
+
+  // Every admin API requires a signed-in user with an ADMIN or SUPER_ADMIN role.
+  app.use('/api/admin', requireAuth, requireAdmin);
 
   // ==========================================
   // COMMERCIAL & INSTITUTIONAL LEADS (QUOTES, TDR, CONTACT)
@@ -122,24 +199,43 @@ async function startServer() {
         email: String(email).trim(),
         phone: String(phone).trim(),
         city: region ? String(region).trim() : null,
-        message: notes ? String(notes).trim() : (ruc ? `RUC: ${ruc}` : null),
+        message: [ruc ? `RUC: ${String(ruc).trim()}` : '', notes ? String(notes).trim() : '']
+          .filter(Boolean).join('\n') || null,
         status: 'NEW',
       }).returning();
 
       const createdQuote = quoteResult[0];
 
+      // Items whose product row can't be linked (deleted/unknown id) are kept as
+      // text in the quote message so the request is never silently incomplete.
+      const unlinkedItems: string[] = [];
       if (Array.isArray(items) && items.length > 0) {
         for (const itm of items) {
           const pId = Number(itm.productId || itm.id);
-          if (!isNaN(pId)) {
+          const qty = Math.max(1, Number(itm.quantity) || 1);
+          const label = `${itm.productName || itm.name || `Producto #${itm.productId || itm.id}`}${itm.model ? ` (Mod: ${itm.model})` : ''} x${qty}`;
+          if (isNaN(pId)) {
+            unlinkedItems.push(label);
+            continue;
+          }
+          try {
             await db.insert(quoteItems).values({
               quoteId: createdQuote.id,
               productId: pId,
-              quantity: Math.max(1, Number(itm.quantity) || 1),
+              quantity: qty,
               notes: itm.notes ? String(itm.notes).trim() : null,
-            }).onConflictDoNothing().catch(() => {});
+            }).onConflictDoNothing();
+          } catch (itemErr: any) {
+            console.warn(`Quote ${createdQuote.id}: could not link item ${pId}:`, itemErr.message);
+            unlinkedItems.push(label);
           }
         }
+      }
+      if (unlinkedItems.length > 0) {
+        const extra = `Equipos solicitados (sin vínculo al catálogo):\n- ${unlinkedItems.join('\n- ')}`;
+        await db.update(quotes)
+          .set({ message: createdQuote.message ? `${createdQuote.message}\n\n${extra}` : extra })
+          .where(eq(quotes.id, createdQuote.id));
       }
 
       res.status(201).json({
@@ -225,18 +321,20 @@ async function startServer() {
       }
 
       const rawBase64 = fileBase64 || fileData || null;
-      let storedFileUrl: string | null = null;
+      let fileContent: Buffer | null = null;
+      let safeName: string | null = null;
       if (rawBase64 && fileName) {
-        const tdrUploadDir = path.resolve(projectRoot, 'public', 'uploads', 'tdr');
-        if (!fs.existsSync(tdrUploadDir)) {
-          fs.mkdirSync(tdrUploadDir, { recursive: true });
+        // Only accept the document types the form offers.
+        const ext = path.extname(String(fileName)).toLowerCase();
+        if (!['.pdf', '.docx', '.xlsx'].includes(ext)) {
+          return res.status(400).json({ error: "Formato de archivo no permitido. Solo PDF, DOCX o XLSX." });
         }
-        const safeName = `${Date.now()}_${path.basename(fileName).replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-        const filePath = path.join(tdrUploadDir, safeName);
-        
-        const base64Content = rawBase64.includes('base64,') ? rawBase64.split('base64,')[1] : rawBase64;
-        fs.writeFileSync(filePath, Buffer.from(base64Content, 'base64'));
-        storedFileUrl = `/uploads/tdr/${safeName}`;
+        const base64Content = String(rawBase64).includes('base64,') ? String(rawBase64).split('base64,')[1] : String(rawBase64);
+        fileContent = Buffer.from(base64Content, 'base64');
+        if (fileContent.length > TDR_MAX_FILE_BYTES) {
+          return res.status(413).json({ error: "El archivo excede el límite de 10MB." });
+        }
+        safeName = path.basename(String(fileName)).replace(/[^a-zA-Z0-9._-]/g, '_');
       }
 
       const tdrResult = await db.insert(tdrRequests).values({
@@ -245,11 +343,25 @@ async function startServer() {
         email: String(email).trim(),
         phone: String(phone).trim(),
         description: description ? String(description).trim() : null,
-        fileUrl: storedFileUrl,
+        fileUrl: null,
         status: 'NEW',
       }).returning();
 
       const createdTdr = tdrResult[0];
+
+      // Stored privately in the database; only admins can download it.
+      let storedFileUrl: string | null = null;
+      if (fileContent && safeName) {
+        await db.insert(tdrFiles).values({
+          tdrId: createdTdr.id,
+          fileName: safeName,
+          mimeType: fileType ? String(fileType).slice(0, 150) : null,
+          size: fileContent.length,
+          dataBase64: fileContent.toString('base64'),
+        });
+        storedFileUrl = `/api/admin/tdr/${createdTdr.id}/file`;
+        await db.update(tdrRequests).set({ fileUrl: storedFileUrl }).where(eq(tdrRequests.id, createdTdr.id));
+      }
       const tdrCode = `TDR-${String(createdTdr.id).padStart(5, '0')}`;
 
       res.status(201).json({
@@ -257,7 +369,6 @@ async function startServer() {
         tdrId: tdrCode,
         id: createdTdr.id,
         expedienteCode: tdrCode,
-        fileUrl: storedFileUrl,
         message: "Expediente TDR recibido exitosamente. Nuestro equipo biomédico revisará las especificaciones en menos de 24 horas."
       });
     } catch (e: any) {
@@ -274,6 +385,30 @@ async function startServer() {
     } catch (e: any) {
       console.error("Error fetching admin TDR:", e);
       res.status(500).json({ error: "Failed to fetch TDR requests" });
+    }
+  });
+
+  // Admin: Download a TDR document (private; protected by the /api/admin guard)
+  app.get("/api/admin/tdr/:id/file", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return res.status(400).json({ error: "ID inválido" });
+      const [file] = await db.select().from(tdrFiles).where(eq(tdrFiles.tdrId, id)).orderBy(desc(tdrFiles.id)).limit(1);
+      if (file) {
+        res.setHeader('Content-Type', file.mimeType || 'application/octet-stream');
+        res.setHeader('Content-Disposition', `attachment; filename="${file.fileName}"`);
+        return res.send(Buffer.from(file.dataBase64, 'base64'));
+      }
+      // Requests saved before files moved to the database kept them in public/uploads/tdr.
+      const [request] = await db.select().from(tdrRequests).where(eq(tdrRequests.id, id)).limit(1);
+      if (request?.fileUrl?.startsWith('/uploads/tdr/')) {
+        const legacyPath = path.join(projectRoot, 'public', 'uploads', 'tdr', path.basename(request.fileUrl));
+        if (fs.existsSync(legacyPath)) return res.download(legacyPath);
+      }
+      res.status(404).json({ error: "Archivo no encontrado" });
+    } catch (e: any) {
+      console.error("Error downloading TDR file:", e);
+      res.status(500).json({ error: "No se pudo descargar el archivo." });
     }
   });
 
@@ -297,8 +432,8 @@ async function startServer() {
   app.post("/api/contact", async (req, res) => {
     try {
       const { name, institution, email, phone, subject, message } = req.body;
-      if (!name || !email) {
-        return res.status(400).json({ error: "Nombre y correo son obligatorios." });
+      if (!String(name || '').trim() || !String(email || '').trim() || !String(phone || '').trim() || !String(message || '').trim()) {
+        return res.status(400).json({ error: "Nombre, correo, teléfono y mensaje son obligatorios." });
       }
 
       await db.insert(quotes).values({
@@ -308,7 +443,7 @@ async function startServer() {
         phone: phone ? String(phone).trim() : null,
         message: `[CONTACTO - ${subject || 'Consulta General'}]: ${message || ''}`,
         status: 'NEW',
-      }).catch(err => console.warn("Contact quote log note:", err.message));
+      });
 
       res.json({
         success: true,
@@ -338,7 +473,7 @@ async function startServer() {
         });
       }
 
-      const reportCode = `FV-${Date.now().toString().slice(-6)}`;
+      const reportCode = `FV-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 
       const [report] = await db.insert(pharmacovigilanceReports).values({
         reportCode,
@@ -374,6 +509,21 @@ async function startServer() {
       res.json(reports);
     } catch (e: any) {
       res.status(500).json({ error: "Failed to fetch pharmacovigilance reports" });
+    }
+  });
+
+  // Admin: Update Pharmacovigilance Report Status
+  app.patch("/api/admin/pharmacovigilance/:id/status", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const { status } = req.body;
+      if (isNaN(id) || !status) {
+        return res.status(400).json({ error: "ID y estado requeridos" });
+      }
+      await db.update(pharmacovigilanceReports).set({ status: String(status) }).where(eq(pharmacovigilanceReports.id, id));
+      res.json({ success: true, message: `Estado del reporte actualizado a ${status}` });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || "Error updating report status" });
     }
   });
 
@@ -452,7 +602,7 @@ async function startServer() {
 
   // SEO: robots.txt
   app.get("/robots.txt", (req, res) => {
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
+    const baseUrl = publicBaseUrl(req);
     res.type("text/plain");
     res.send(`User-agent: *
 Allow: /
@@ -468,7 +618,7 @@ Sitemap: ${baseUrl}/sitemap.xml`);
 
   // SEO: Sitemap Index
   app.get("/sitemap.xml", (req, res) => {
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
+    const baseUrl = publicBaseUrl(req);
     res.type("application/xml");
     res.send(`<?xml version="1.0" encoding="UTF-8"?>
 <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
@@ -482,7 +632,7 @@ Sitemap: ${baseUrl}/sitemap.xml`);
   // SEO: Products Sitemap
   app.get("/sitemaps/products.xml", async (req, res) => {
     try {
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const baseUrl = publicBaseUrl(req);
       // For massive catalogs, this should be paginated (e.g. products-1.xml), but for <50k a single file is valid.
       // Max 50,000 URLs per sitemap. We'll fetch the most recent published products.
       const publishedProducts = await db
@@ -515,7 +665,7 @@ ${urls}
   // SEO: Categories Sitemap
   app.get("/sitemaps/categories.xml", async (req, res) => {
     try {
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const baseUrl = publicBaseUrl(req);
       const activeCategories = await db.select({ slug: categories.slug }).from(categories);
 
       const urls = activeCategories.map(c => `  <url>
@@ -538,7 +688,7 @@ ${urls}
   // SEO: Brands Sitemap
   app.get("/sitemaps/brands.xml", async (req, res) => {
     try {
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const baseUrl = publicBaseUrl(req);
       const activeBrands = await db.select({ slug: brands.slug }).from(brands);
 
       const urls = activeBrands.map(b => `  <url>
@@ -561,7 +711,7 @@ ${urls}
   // SEO: Manufacturers Sitemap
   app.get("/sitemaps/manufacturers.xml", async (req, res) => {
     try {
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const baseUrl = publicBaseUrl(req);
       const uniqueMfgs = await db
         .select({ manufacturer: products.manufacturer })
         .from(products)
@@ -750,7 +900,7 @@ ${urls}
       const limitNum = Math.min(100, Math.max(1, parseInt(String(limit), 10) || 24));
       const offset = (pageNum - 1) * limitNum;
 
-      let conditions = [
+      let conditions: SQL[] = [
         inArray(products.categoryId, categoryIds),
         eq(products.publicationStatus, 'PUBLISHED')
       ];
@@ -761,7 +911,7 @@ ${urls}
           ilike(products.name, searchTerm),
           ilike(products.model, searchTerm),
           ilike(products.catalogNumber, searchTerm)
-        ));
+        )!);
       }
 
       if (brandId) {
@@ -772,7 +922,7 @@ ${urls}
         conditions.push(or(
           ilike(products.manufacturer, String(manufacturer)),
           ilike(brands.manufacturer, String(manufacturer))
-        ));
+        )!);
       }
 
       let orderByArg = desc(products.createdAt);
@@ -1588,7 +1738,8 @@ ${urls}
       const limitNum = Math.min(100, Math.max(1, parseInt(String(limit), 10) || 24));
       const offset = (pageNum - 1) * limitNum;
 
-      let conditions: any[] = [];
+      // Public catalog: only published products, consistent with facets and suggestions.
+      let conditions: any[] = [eq(products.publicationStatus, 'PUBLISHED')];
       
       if (search) {
         const query = `%${String(search).trim()}%`;
@@ -1630,7 +1781,10 @@ ${urls}
             ));
           }
         } else {
-          const cat = await db.select().from(categories).where(eq(categories.slug, catVal)).limit(1);
+          // Accept slug, or the category name for links built from display names.
+          const cat = await db.select().from(categories)
+            .where(or(eq(categories.slug, catVal), ilike(categories.name, catVal.trim())))
+            .limit(1);
           if (cat.length > 0) {
             const catId = cat[0].id;
             const childCats = await db.select({ id: categories.id }).from(categories).where(eq(categories.parentId, catId));
@@ -1652,7 +1806,9 @@ ${urls}
             eq(products.categoryId, subNum)
           ));
         } else {
-          const sub = await db.select().from(categories).where(eq(categories.slug, subVal)).limit(1);
+          const sub = await db.select().from(categories)
+            .where(or(eq(categories.slug, subVal), ilike(categories.name, subVal.trim())))
+            .limit(1);
           if (sub.length > 0) {
             conditions.push(or(
               eq(products.subcategoryId, sub[0].id),
@@ -1668,7 +1824,9 @@ ${urls}
         if (!isNaN(brandNum)) {
           conditions.push(eq(products.brandId, brandNum));
         } else {
-          const br = await db.select().from(brands).where(eq(brands.slug, brandVal)).limit(1);
+          const br = await db.select().from(brands)
+            .where(or(eq(brands.slug, brandVal), ilike(brands.name, brandVal.trim())))
+            .limit(1);
           if (br.length > 0) {
             conditions.push(eq(products.brandId, br[0].id));
           }
@@ -1861,7 +2019,7 @@ ${urls}
       .from(products)
       .leftJoin(brands, eq(products.brandId, brands.id))
       .leftJoin(categories, eq(products.categoryId, categories.id))
-      .where(condition)
+      .where(and(condition, eq(products.publicationStatus, 'PUBLISHED')))
       .limit(1);
 
       if (product.length === 0) {
@@ -2008,7 +2166,8 @@ ${urls}
       const uid = req.user!.uid;
       const email = req.user!.email!;
       const user = await getOrCreateUser(uid, email);
-      res.json(user);
+      const role = await resolveUserRole(req);
+      res.json({ ...user, role, isAdmin: ADMIN_ROLES.includes(role) });
     } catch (e) {
       console.error(e);
       res.status(500).json({ error: "Failed to sync user" });
@@ -2018,6 +2177,7 @@ ${urls}
   // Admin Routes (Requires Auth, basic implementation)
   app.get("/api/admin/dashboard", requireAuth, async (req: AuthRequest, res) => {
     try {
+      const queryStartedAt = Date.now();
       const now = new Date();
       const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       const startOfWeek = new Date(now);
@@ -2064,7 +2224,23 @@ ${urls}
       const reviewProducts = Number(reviewRes[0]?.count || 0);
       const outdatedProducts = Number(outdatedRes[0]?.count || 0);
       const publishedProducts = Number(publishedRes[0]?.count || 0);
-      const autoVerifiedCount = Math.max(0, Math.floor(verifiedProducts * 0.88)); // Auto-verified portion
+      // Data-quality figures computed from the catalog itself.
+      const [qualityRow] = (await db.select({
+        autoVerified: sql<number>`count(*) filter (where ${products.verifiedBy} = 'AUTONOMOUS_ENGINE')`,
+        avgScore: sql<number>`coalesce(round(avg(${products.validationScore}) filter (where ${products.validationScore} > 0)), 0)`,
+        withSpecs: sql<number>`count(*) filter (where coalesce(trim(${products.technicalSpecs}), '') <> '')`,
+        withModel: sql<number>`count(*) filter (where coalesce(trim(${products.model}), '') <> '' and coalesce(trim(${products.catalogNumber}), '') <> '')`,
+        withSource: sql<number>`count(*) filter (where coalesce(trim(${products.sourceUrl}), '') <> '')`,
+        // Explicit aliases: drizzle leaves columns unqualified inside select fields.
+        withImage: sql<number>`count(*) filter (where exists (select 1 from product_images pi where pi.product_id = products.id))`,
+        incomplete: sql<number>`count(*) filter (where coalesce(trim(${products.model}), '') = '' or coalesce(trim(${products.technicalSpecs}), '') = '')`,
+      }).from(products)) as any[];
+      const pct = (n: number) => (totalProducts > 0 ? Math.round((Number(n) / totalProducts) * 100) : 0);
+      const autoVerifiedCount = Number(qualityRow?.autoVerified || 0);
+      const specsRatio = pct(qualityRow?.withSpecs || 0);
+      const traceabilityRatio = pct(qualityRow?.withSource || 0);
+      const imagesRatio = pct(qualityRow?.withImage || 0);
+      const freshnessRatio = totalProducts > 0 ? Math.round(((totalProducts - outdatedProducts) / totalProducts) * 100) : 0;
 
       // Autonomous mode settings
       const autoSettings = (await db.select().from(autonomousSettings).limit(1))[0];
@@ -2139,15 +2315,16 @@ ${urls}
         activeJobs: Number(jobsRes[0]?.count || 0),
         possibleDuplicates: pendingDups,
         quality: {
-          avgScore: 92,
+          avgScore: Number(qualityRow?.avgScore || 0),
           openIssues: reviewProducts + pendingDups,
           criticalIssues: reviewProducts,
-          incompleteProducts: Math.floor(draftProducts * 0.4),
-          completenessRatio: 94,
-          traceabilityRatio: 99,
-          imagesRatio: 97,
-          specsRatio: 91,
-          freshnessRatio: 89,
+          incompleteProducts: Number(qualityRow?.incomplete || 0),
+          completenessRatio: Math.round((specsRatio + imagesRatio + traceabilityRatio) / 3),
+          traceabilityRatio,
+          imagesRatio,
+          specsRatio,
+          freshnessRatio,
+          modelsRatio: pct(qualityRow?.withModel || 0),
         },
         automation: {
           activeJobs: Number(jobsRes[0]?.count || 0),
@@ -2159,17 +2336,13 @@ ${urls}
         },
         system: {
           status: 'HEALTHY',
-          latencyMs: 38,
-          errorRate: 0.1,
-          cacheHitRatio: 88,
-          workers: 4,
+          // Measured: time this dashboard took to query the database.
+          latencyMs: Date.now() - queryStartedAt,
+          cacheHitRatio: Math.round(cacheEngine.getStats().hitRatio),
         },
-        recentActivity: recentAudit.length > 0 ? recentAudit : [
-          { id: 1, action: 'AUTO_VERIFIED', decision: 'AUTO_PUBLISHED', timestamp: new Date(Date.now() - 1000 * 60 * 14), evidenceSummary: 'Producto validado automáticamente con evidencia completa.' },
-          { id: 2, action: 'DISCOVERY', decision: 'DRAFT_CREATED', timestamp: new Date(Date.now() - 1000 * 60 * 42), evidenceSummary: 'Nueva ficha técnica extraída desde fuente oficial Alkofarma.' },
-          { id: 3, action: 'EXTRACTION', decision: 'SOURCE_SYNCED', timestamp: new Date(Date.now() - 1000 * 60 * 120), evidenceSummary: 'Sitemap procesado con 18 items detectados.' }
-        ],
+        recentActivity: recentAudit,
         priorityAlerts,
+        generatedAt: new Date().toISOString(),
       };
 
       res.json(stats);
@@ -2205,21 +2378,39 @@ ${urls}
   // Get Admin Catalog Products with Brand, Category, Image and Verification Status
   app.get("/api/admin/catalog/products", requireAuth, async (req: AuthRequest, res) => {
     try {
-      const { status, search, limit = 50, offset = 0 } = req.query;
+      const { status, search, manufacturer, categoryId, brandId, issue, limit = 50, offset = 0 } = req.query;
       
-      let conditions = [];
+      let conditions: SQL[] = [];
       if (status && status !== 'ALL') {
         conditions.push(eq(products.verificationStatus, String(status)));
       }
       if (search) {
-        const query = `%${search}%`;
+        const query = `%${String(search).trim()}%`;
         conditions.push(
           or(
             ilike(products.name, query),
             ilike(products.model, query),
+            ilike(products.catalogNumber, query),
             ilike(products.manufacturer, query)
-          )
+          )!
         );
+      }
+      if (manufacturer) {
+        conditions.push(ilike(products.manufacturer, String(manufacturer).trim()));
+      }
+      if (categoryId && !isNaN(Number(categoryId))) {
+        conditions.push(or(eq(products.categoryId, Number(categoryId)), eq(products.subcategoryId, Number(categoryId)))!);
+      }
+      if (brandId && !isNaN(Number(brandId))) {
+        conditions.push(eq(products.brandId, Number(brandId)));
+      }
+      // Data-quality filters run in SQL so pagination and totals stay correct.
+      if (issue === 'NO_IMAGE') {
+        conditions.push(sql`NOT EXISTS (SELECT 1 FROM ${productImages} WHERE ${productImages.productId} = ${products.id})`);
+      } else if (issue === 'NO_MODEL') {
+        conditions.push(sql`COALESCE(TRIM(${products.model}), '') = ''`);
+      } else if (issue === 'NO_SPECS') {
+        conditions.push(sql`COALESCE(TRIM(${products.technicalSpecs}), '') = ''`);
       }
 
       const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -2230,6 +2421,7 @@ ${urls}
           name: products.name,
           slug: products.slug,
           model: products.model,
+          catalogNumber: products.catalogNumber,
           manufacturer: products.manufacturer,
           brandId: products.brandId,
           brandName: brands.name,
@@ -2241,6 +2433,7 @@ ${urls}
           publicationStatus: products.publicationStatus,
           verificationStatus: products.verificationStatus,
           confidenceLevel: products.confidenceLevel,
+          validationScore: products.validationScore,
           sourceUrl: products.sourceUrl,
           createdAt: products.createdAt,
           updatedAt: products.updatedAt,
@@ -2301,7 +2494,7 @@ ${urls}
       const productId = Number(req.params.id);
       const { verificationStatus } = req.body;
 
-      if (!['VERIFIED', 'DRAFT', 'PENDING REVIEW', 'REJECTED', 'OUTDATED'].includes(verificationStatus)) {
+      if (!['VERIFIED', 'DRAFT', 'REVIEW', 'REJECTED', 'OUTDATED'].includes(verificationStatus)) {
         return res.status(400).json({ error: "Invalid verification status" });
       }
 
@@ -2552,20 +2745,23 @@ ${urls}
         .select({
           name: products.manufacturer,
           count: sql<number>`count(*)`,
+          avgScore: sql<number>`coalesce(round(avg(${products.validationScore}) filter (where ${products.validationScore} > 0)), 0)`,
+          sourcesCount: sql<number>`count(distinct ${products.sourceUrl}) filter (where coalesce(${products.sourceUrl}, '') <> '')`,
         })
         .from(products)
         .where(sql`${products.manufacturer} IS NOT NULL AND ${products.manufacturer} != ''`)
         .groupBy(products.manufacturer)
         .orderBy(desc(sql<number>`count(*)`));
 
+      // Only figures backed by the catalog; country is not stored, so it is not reported.
       const enriched = list.map((m, idx) => ({
         id: idx + 1,
         name: m.name,
         productCount: Number(m.count),
-        country: 'Internacional',
+        country: null,
         status: 'ACTIVE',
-        qualityScore: 91 + (idx % 8),
-        sourcesCount: 1 + (idx % 3),
+        qualityScore: Number(m.avgScore) || null,
+        sourcesCount: Number(m.sourcesCount),
       }));
 
       res.json(enriched);
@@ -2605,7 +2801,7 @@ ${urls}
     try {
       const { id, name, manufacturer, logo, website, description, status } = req.body;
       if (!name) return res.status(400).json({ error: "Nombre de marca requerido" });
-      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+      const slug = slugify(name);
 
       if (id) {
         await db.update(brands).set({ name, slug, manufacturer, logo, website, description, status }).where(eq(brands.id, Number(id)));
@@ -2649,10 +2845,11 @@ ${urls}
     try {
       const { id, name, parentId, description, image, status } = req.body;
       if (!name) return res.status(400).json({ error: "Nombre de categoría requerido" });
-      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+      const slug = slugify(name);
 
       if (id) {
-        await db.update(categories).set({ name, slug, parentId: parentId ? Number(parentId) : null, description, image, status }).where(eq(categories.id, Number(id)));
+        // Keep the existing slug on rename so public /categorias/<slug> links keep working.
+        await db.update(categories).set({ name, parentId: parentId ? Number(parentId) : null, description, image, ...(status ? { status } : {}) }).where(eq(categories.id, Number(id)));
       } else {
         await db.insert(categories).values({ name, slug, parentId: parentId ? Number(parentId) : null, description, image, status: status || 'ACTIVE' });
       }
@@ -2696,8 +2893,26 @@ ${urls}
   app.patch("/api/admin/users/:id/role", requireAuth, async (req: AuthRequest, res) => {
     try {
       const { role } = req.body;
-      await db.update(users).set({ role }).where(eq(users.id, Number(req.params.id)));
-      res.json({ success: true });
+      const ASSIGNABLE_ROLES = ['SUPER_ADMIN', 'ADMIN', 'CATALOG_MANAGER', 'QUALITY_ANALYST', 'USER'];
+      if (!ASSIGNABLE_ROLES.includes(role)) {
+        return res.status(400).json({ error: "Rol no válido." });
+      }
+      const targetId = Number(req.params.id);
+      const [target] = await db.select().from(users).where(eq(users.id, targetId)).limit(1);
+      if (!target) {
+        return res.status(404).json({ error: "Usuario no encontrado." });
+      }
+      if (target.uid === req.user!.uid) {
+        return res.status(400).json({ error: "No puede cambiar su propio rol." });
+      }
+      // Only a SUPER_ADMIN may grant, change or remove administrator roles.
+      const callerRole = await resolveUserRole(req);
+      const touchesAdmin = ADMIN_ROLES.includes(role) || ADMIN_ROLES.includes(target.role || 'USER');
+      if (touchesAdmin && callerRole !== 'SUPER_ADMIN') {
+        return res.status(403).json({ error: "Solo un SUPER_ADMIN puede asignar o retirar roles de administrador." });
+      }
+      await db.update(users).set({ role }).where(eq(users.id, targetId));
+      res.json({ success: true, role });
     } catch (e) {
       console.error(e);
       res.status(500).json({ error: "Failed to update role" });
@@ -2707,10 +2922,15 @@ ${urls}
   // Media (Images & Documents) Center
   app.get("/api/admin/media/overview", requireAuth, async (req: AuthRequest, res) => {
     try {
-      const [totalImages, totalDocs, totalProds] = await Promise.all([
+      const [totalImages, totalDocs, totalProds, coverage] = await Promise.all([
         db.select({ count: sql<number>`count(*)` }).from(productImages),
         db.select({ count: sql<number>`count(*)` }).from(productDocuments),
         db.select({ count: sql<number>`count(*)` }).from(products),
+        // Products that have no image / no document at all (not totals minus totals).
+        db.select({
+          withoutImage: sql<number>`count(*) filter (where not exists (select 1 from product_images pi where pi.product_id = products.id))`,
+          withoutDoc: sql<number>`count(*) filter (where not exists (select 1 from product_documents pd where pd.product_id = products.id))`,
+        }).from(products),
       ]);
 
       const prodsCount = Number(totalProds[0]?.count || 0);
@@ -2721,10 +2941,8 @@ ${urls}
         totalImages: imagesCount,
         totalDocuments: docsCount,
         totalProducts: prodsCount,
-        productsWithoutImage: Math.max(0, prodsCount - Math.min(prodsCount, imagesCount)),
-        productsWithoutDoc: Math.max(0, prodsCount - Math.min(prodsCount, docsCount)),
-        brokenImages: 0,
-        brokenDocs: 0,
+        productsWithoutImage: Number(coverage[0]?.withoutImage || 0),
+        productsWithoutDoc: Number(coverage[0]?.withoutDoc || 0),
       });
     } catch (e) {
       console.error(e);
@@ -2738,37 +2956,47 @@ ${urls}
       const failedJobs = await db
         .select()
         .from(scrapingJobs)
-        .where(eq(scrapingJobs.status, 'ERROR'))
-        .limit(10);
+        .where(inArray(scrapingJobs.status, ['ERROR', 'COMPLETED_WITH_WARNINGS']))
+        .orderBy(desc(scrapingJobs.createdAt))
+        .limit(50);
 
-      const groupedErrors = [
-        {
-          id: 'grp-1',
-          source: 'Alkofarma Oficial',
-          errorType: 'DOM_SELECTOR_EMPTY',
-          severity: 'WARNING',
-          occurrences: 3,
-          firstSeen: new Date(Date.now() - 1000 * 60 * 180),
-          lastSeen: new Date(Date.now() - 1000 * 60 * 15),
-          message: 'Atributo "features" no encontrado en 3 fichas técnicas con maquetación antigua.',
-          sampleUrl: 'https://alkofarma.com/antisepticos',
-        },
-        {
-          id: 'grp-2',
-          source: 'B.Braun Catálogo',
-          errorType: 'HTTP_TIMEOUT',
-          severity: 'MEDIUM',
-          occurrences: 1,
-          firstSeen: new Date(Date.now() - 1000 * 60 * 420),
-          lastSeen: new Date(Date.now() - 1000 * 60 * 120),
-          message: 'Servidor remoto excedió tiempo de espera (5000ms) durante sitemap crawler.',
-          sampleUrl: 'https://www.bbraun.com/sitemap.xml',
+      // Group the per-source failures recorded in each job's error log ("<url>: <STATUS> (<detail>)").
+      const clusterMap = new Map<string, any>();
+      for (const job of failedJobs) {
+        const lines = (job.errorLog || '').split('\n').filter(Boolean);
+        for (const line of lines) {
+          const match = line.match(/^(\S+):\s*([A-Z_]+)(?:\s*\((.*)\))?/);
+          const url = match?.[1] || '';
+          const errorType = match?.[2] || 'ERROR';
+          let source = url;
+          try { source = new URL(url).hostname; } catch { /* keep raw */ }
+          const key = `${source}|${errorType}`;
+          const seenAt = job.endedAt || job.createdAt || new Date();
+          const existing = clusterMap.get(key);
+          if (existing) {
+            existing.occurrences += 1;
+            if (seenAt < existing.firstSeen) existing.firstSeen = seenAt;
+            if (seenAt > existing.lastSeen) existing.lastSeen = seenAt;
+          } else {
+            clusterMap.set(key, {
+              id: key,
+              source: source || 'Fuente desconocida',
+              errorType,
+              severity: errorType === 'BLOCKED' || errorType === 'HTTP_ERROR' ? 'MEDIUM' : 'WARNING',
+              occurrences: 1,
+              firstSeen: seenAt,
+              lastSeen: seenAt,
+              message: match?.[3] || line,
+              sampleUrl: url,
+            });
+          }
         }
-      ];
+      }
+      const clusters = Array.from(clusterMap.values()).sort((a, b) => b.occurrences - a.occurrences);
 
       res.json({
-        totalErrors: failedJobs.length + 4,
-        clusters: groupedErrors,
+        totalErrors: clusters.reduce((acc, c) => acc + c.occurrences, 0),
+        clusters,
         failedJobs,
       });
     } catch (e) {
@@ -2802,15 +3030,19 @@ ${urls}
       const { scraper, qualityControl, autoPublishScore, riskThreshold, operatingMode } = req.body;
       
       const current = (await db.select().from(autonomousSettings).limit(1))[0];
+      const values = {
+        emergencyStop: !scraper,
+        autonomousModeEnabled: qualityControl,
+        autoPublishMinScore: autoPublishScore,
+        riskThreshold,
+        operatingMode,
+        updatedAt: new Date(),
+      };
+      // First save creates the settings row instead of silently doing nothing.
       if (current) {
-        await db.update(autonomousSettings).set({
-          emergencyStop: !scraper,
-          autonomousModeEnabled: qualityControl,
-          autoPublishMinScore: autoPublishScore,
-          riskThreshold,
-          operatingMode,
-          updatedAt: new Date(),
-        }).where(eq(autonomousSettings.id, current.id));
+        await db.update(autonomousSettings).set(values).where(eq(autonomousSettings.id, current.id));
+      } else {
+        await db.insert(autonomousSettings).values(values);
       }
 
       res.json({ success: true, message: "Ajustes de mantenimiento guardados." });
@@ -2871,7 +3103,6 @@ ${urls}
     }
   });
 
-  app.use(express.json({ limit: '50mb' })); // Allow large payloads for bulk import
 
   app.post("/api/admin/products/bulk", requireAuth, async (req: AuthRequest, res) => {
     try {
@@ -2884,7 +3115,7 @@ ${urls}
       // For this architecture, we insert them and use ON CONFLICT to avoid crashing.
       const mappedProducts = items.map((p: any) => {
         // Generate a simple slug from name if not present
-        const slug = p.slug || p.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+        const slug = p.slug || slugify(String(p.name));
         return {
           name: String(p.name).substring(0, 255),
           slug: slug.substring(0, 255),
@@ -3088,13 +3319,20 @@ ${urls}
       }
 
       const now = new Date();
+      const probe = await probeUrl(source.url);
       const [updated] = await db.update(sources).set({
         lastCheckedAt: now,
-        status: 'ACTIVE',
+        status: probe.ok ? 'ACTIVE' : 'ERROR',
         updatedAt: now
       }).where(eq(sources.id, id)).returning();
 
-      res.json({ success: true, message: `Fuente ${source.domain} comprobada exitosamente. Estado: ACTIVA.`, source: updated });
+      res.json({
+        success: probe.ok,
+        message: probe.ok
+          ? `Fuente ${source.domain} accesible (HTTP ${probe.status}). Estado: ACTIVA.`
+          : `Fuente ${source.domain} no accesible: ${probe.error}. Estado: ERROR.`,
+        source: updated,
+      });
     } catch (e) {
       console.error("Error checking source:", e);
       res.status(500).json({ error: "Failed to check source" });
@@ -3109,18 +3347,24 @@ ${urls}
         return res.status(404).json({ error: "Source not found" });
       }
 
+      // Extract from the URLs registered for this source, or its products/base URL.
+      const registered = await db.select().from(scraperUrls).where(eq(scraperUrls.sourceId, id));
+      const targets: ScrapeTarget[] = registered.length > 0
+        ? registered
+        : [{ url: source.productsUrl || source.url, sourceId: id }];
+      const outcome = await runScrapingJob(targets, id, null);
+
       const now = new Date();
-      const randomDetected = Math.floor(Math.random() * 120) + 10;
       const [updated] = await db.update(sources).set({
         lastExtractionAt: now,
-        detectedProductCount: (source.detectedProductCount || 0) + randomDetected,
-        status: 'ACTIVE',
+        detectedProductCount: outcome.productCount,
+        status: outcome.job.status === 'ERROR' ? 'ERROR' : 'ACTIVE',
         updatedAt: now
       }).where(eq(sources.id, id)).returning();
 
       res.json({ 
-        success: true, 
-        message: `Extracción completada para ${source.domain}. Se detectaron ${randomDetected} productos actualizados.`, 
+        success: outcome.job.status !== 'ERROR', 
+        message: `${source.domain}: ${outcome.message}`, 
         source: updated 
       });
     } catch (e) {
@@ -3213,15 +3457,17 @@ ${urls}
         return res.status(404).json({ error: "URL not found" });
       }
 
-      // Perform simulated deep validation
+      const probe = await probeUrl(targetUrl.url);
       const [updated] = await db.update(scraperUrls).set({
-        status: 'ACTIVE',
+        status: probe.ok ? 'ACTIVE' : 'ERROR',
         updatedAt: new Date()
       }).where(eq(scraperUrls.id, id)).returning();
 
       res.json({ 
-        success: true, 
-        message: `URL ${targetUrl.url} validada correctamente. Dominio accesible y respuesta HTTP 200 OK.`,
+        success: probe.ok, 
+        message: probe.ok
+          ? `URL ${targetUrl.url} accesible (HTTP ${probe.status}).`
+          : `URL ${targetUrl.url} no accesible: ${probe.error}.`,
         url: updated 
       });
     } catch (e) {
@@ -3240,134 +3486,116 @@ ${urls}
     }
   });
 
-  app.post("/api/admin/scraper/jobs", requireAuth, async (req: AuthRequest, res) => {
-    try {
-      const { sourceId, urlId } = req.body;
-      const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  type ScrapeTarget = { id?: number; url: string; sourceId?: number | null; manufacturer?: string | null; errorsCount?: number | null };
 
-      // Create scraping job
+  // Runs the real scraper over the given URLs, stores the job and the extracted drafts.
+  const runScrapingJob = async (targets: ScrapeTarget[], sourceId: number | null, urlId: number | null) => {
+      const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const startedAt = new Date();
       const [job] = await db.insert(scrapingJobs).values({
         jobId,
-        sourceId: sourceId ? Number(sourceId) : null,
-        urlId: urlId ? Number(urlId) : null,
-        status: 'COMPLETED',
-        progressPercent: 100,
-        totalFound: 12,
-        processedCount: 12,
-        validCount: 10,
-        duplicatesCount: 1,
-        errorsCount: 0,
-        incompleteCount: 1,
-        imagesFound: 36,
-        documentsFound: 8,
-        executionTimeMs: 3450,
-        startedAt: new Date(),
-        endedAt: new Date()
+        sourceId,
+        urlId,
+        status: 'RUNNING',
+        startedAt,
       }).returning();
 
-      // Generate realistic medical draft products with deep dossier fields
-      const sampleDrafts = [
-        {
-          name: 'Monitor Multiparamétrico de Signos Vitales Pro 12"',
-          brand: 'Mindray',
-          manufacturer: 'Mindray Medical',
-          model: 'uMEC 12',
-          reference: 'MR-UMEC12-MED',
-          description: 'Monitor multiparamétrico de altas prestaciones con pantalla táctil TFT de 12.1 pulgadas, ECG, SpO2, NIBP, Respiration, Temp. Diseñado para áreas de hospitalización y urgencias.',
-          specifications: [
-            { name: "Pantalla", value: "12.1 pulgadas táctil", unit: "pulgadas", source: "Datasheet Oficial" },
-            { name: "Derivaciones ECG", value: "3/5 derivaciones", unit: "derivaciones", source: "Manual de Usuario" },
-            { name: "Batería", value: "Hasta 8 horas", unit: "horas", source: "Ficha Técnica" },
-            { name: "Peso", value: "3.6 kg", unit: "kg", source: "Datasheet Oficial" }
-          ],
-          applications: 'Hospitalización, Urgencias, Triage',
-          presentation: 'Unidad con accesorios completos',
-          variants: [{ name: "uMEC 12 Standard", ref: "MR-UMEC12-S" }, { name: "uMEC 12 con EtCO2", ref: "MR-UMEC12-ET" }],
-          accessories: [{ name: "Cable ECG 5 derivaciones", type: "Incluido" }, { name: "Sensor SpO2 adulto reutilizable", type: "Incluido" }, { name: "Módulo EtCO2 sidestream", type: "Opcional" }],
-          configurations: [{ name: "Configuración Rodable", desc: "Incluye carro móvil con canasta" }, { name: "Configuración Mural", desc: "Incluye brazo de pared" }],
-          images: [
-            'https://images.unsplash.com/photo-1516549655169-df83a0774514?auto=format&fit=crop&q=80&w=800',
-            'https://images.unsplash.com/photo-1579684385127-1ef15d508118?auto=format&fit=crop&q=80&w=800'
-          ],
-          documents: [
-            { name: 'Ficha Técnica uMEC 12', url: 'https://example.com/docs/umec12.pdf', type: 'PDF' },
-            { name: 'Manual de Usuario uMEC 12', url: 'https://example.com/docs/umec12_manual.pdf', type: 'MANUAL' }
-          ],
-          conflicts: [],
-          missingFields: ['Consumo eléctrico exacto'],
-          sourcesList: ['https://www.mindray.com/products/umec12', 'https://example.com/docs/umec12.pdf'],
-          completenessBreakdown: { identity: 100, description: 100, specifications: 90, images: 100, documentation: 95 },
-          auditReport: { individualPage: true, categoryContext: true, pdfDatasheet: true, manual: true, galleryImages: true, variants: true, accessories: true },
-          completenessScore: 94,
-          duplicateStatus: 'UNIQUE'
-        },
-        {
-          name: 'Ventilador Mecánico de Cuidado Intensivo ICU-700',
-          brand: 'Mindray',
-          manufacturer: 'Mindray Medical',
-          model: 'SV300',
-          reference: 'SV-300-ICU',
-          description: 'Ventilador pulmonar avanzado para pacientes adultos, pediátricos y neonatales con modos invasivos y no invasivos, turbina integrada y pantalla de alta resolución.',
-          specifications: [
-            { name: "Modos Ventilación", value: "VC-A/C, PC-A/C, SIMV, CPAP/PSV", unit: "modos", source: "Datasheet" },
-            { name: "Flujo Inspiratorio", value: "Hasta 240 L/min", unit: "L/min", source: "Datasheet" },
-            { name: "Pantalla", value: "15.1 pulgadas táctil", unit: "pulgadas", source: "Especificaciones Oficiales" }
-          ],
-          applications: 'UCI Adulto y Pediátrica',
-          presentation: 'Sistema completo con carro y brazo articulado',
-          variants: [{ name: "SV300 Standard", ref: "SV300-STD" }, { name: "SV300 con Cpap Neo", ref: "SV300-NEO" }],
-          accessories: [{ name: "Circuito paciente reutilizable", type: "Incluido" }, { name: "Humidificador térmico", type: "Incluido" }],
-          configurations: [{ name: "Carro rodable con compresor", desc: "Independiente de red de aire" }],
-          images: ['https://images.unsplash.com/photo-1584515979956-d9f6e5d09982?auto=format&fit=crop&q=80&w=800'],
-          documents: [{ name: 'Manual Clínico SV300', url: 'https://example.com/docs/sv300.pdf', type: 'PDF' }],
-          conflicts: [],
-          missingFields: ['Certificación FDA específica'],
-          sourcesList: ['https://www.mindray.com/ventilator/sv300'],
-          completenessBreakdown: { identity: 100, description: 90, specifications: 85, images: 90, documentation: 80 },
-          auditReport: { individualPage: true, categoryContext: true, pdfDatasheet: true, manual: false, galleryImages: true, variants: true, accessories: true },
-          completenessScore: 89,
-          duplicateStatus: 'UNIQUE'
-        }
-      ];
+      const { scraperService } = await import("./src/services/scraperService.ts");
+      let result;
+      try {
+        result = await scraperService.startScraping(targets.map(t => t.url));
+      } catch (scrapeErr: any) {
+        await db.update(scrapingJobs).set({
+          status: 'ERROR',
+          errorLog: scrapeErr.message,
+          endedAt: new Date(),
+          executionTimeMs: Date.now() - startedAt.getTime(),
+        }).where(eq(scrapingJobs.id, job.id));
+        throw new Error(`La extracción falló: ${scrapeErr.message}`);
+      }
 
-      for (const draft of sampleDrafts) {
-        const normalizedResult = normalizationService.normalize(draft);
+      for (const product of result.products) {
+        const missingFields = [
+          !product.model && 'Modelo',
+          !product.description && 'Descripción',
+          !product.imageUrl && 'Imagen',
+          !product.datasheetUrl && 'Ficha técnica',
+        ].filter(Boolean);
+        const target = targets.find(t => product.sourceUrl.startsWith(t.url));
         await db.insert(draftProducts).values({
           jobId,
-          sourceId: sourceId ? Number(sourceId) : null,
-          sourceUrl: 'https://www.mindray.com/products',
-          productUrl: `https://www.mindray.com/products/${draft.model.toLowerCase()}`,
-          name: draft.name, // Official commercial name never modified artificially
-          brand: normalizedResult.normalized.brand,
-          manufacturer: normalizedResult.normalized.manufacturer,
-          model: draft.model,
-          reference: draft.reference,
-          description: draft.description,
-          specifications: normalizedResult.normalized.specifications,
-          applications: normalizedResult.normalized.applications.join(', '),
-          presentation: normalizedResult.normalized.presentation,
-          variants: draft.variants,
-          accessories: draft.accessories,
-          configurations: draft.configurations,
-          images: draft.images,
-          documents: draft.documents,
-          conflicts: draft.conflicts,
-          missingFields: draft.missingFields,
-          sourcesList: draft.sourcesList,
-          completenessBreakdown: draft.completenessBreakdown,
-          auditReport: draft.auditReport,
-          completenessScore: draft.completenessScore,
-          status: 'DRAFT',
-          duplicateStatus: draft.duplicateStatus as any,
-          originalData: normalizedResult.original,
-          normalizedData: normalizedResult.normalized
+          sourceId: target?.sourceId ?? sourceId,
+          sourceUrl: target?.url || product.sourceUrl,
+          productUrl: product.sourceUrl,
+          name: product.name.substring(0, 500),
+          brand: product.brand,
+          manufacturer: target?.manufacturer || product.brand,
+          model: product.model,
+          description: product.description,
+          specifications: product.features.map(f => ({ name: 'Característica', value: f, source: product.sourceUrl })),
+          applications: product.application.join(', '),
+          presentation: product.presentation,
+          images: product.imageUrl ? [product.imageUrl] : [],
+          documents: product.datasheetUrl ? [{ name: 'Ficha técnica', url: product.datasheetUrl, type: 'PDF' }] : [],
+          missingFields,
+          sourcesList: [product.sourceUrl],
+          completenessScore: Math.round(((4 - missingFields.length) / 4) * 100),
+          status: missingFields.length > 2 ? 'INCOMPLETE' : 'DRAFT',
+          originalData: product as any,
         });
       }
 
-      res.status(201).json({ success: true, job, message: "Extracción completada con éxito. 3 productos DRAFT nuevos añadidos para revisión." });
-    } catch (e) {
+      const failedSources = result.sourceStatuses.filter(st => st.status !== 'COMPLETED');
+      for (const t of targets) {
+        if (!t.id) continue;
+        const st = result.sourceStatuses.find(x => x.url === t.url);
+        await db.update(scraperUrls).set({
+          lastExtractionAt: new Date(),
+          detectedProducts: result.products.filter(p => p.sourceUrl.startsWith(t.url)).length,
+          errorsCount: st && st.status !== 'COMPLETED' ? (t.errorsCount || 0) + 1 : t.errorsCount,
+          updatedAt: new Date(),
+        }).where(eq(scraperUrls.id, t.id));
+      }
+
+      const [finishedJob] = await db.update(scrapingJobs).set({
+        status: failedSources.length === 0 ? 'COMPLETED' : (result.products.length > 0 ? 'COMPLETED_WITH_WARNINGS' : 'ERROR'),
+        progressPercent: 100,
+        totalFound: result.stats.found,
+        processedCount: result.products.length,
+        validCount: result.products.length - result.stats.incomplete,
+        duplicatesCount: result.stats.duplicates,
+        errorsCount: failedSources.length,
+        incompleteCount: result.stats.incomplete,
+        imagesFound: result.products.filter(p => p.imageUrl).length,
+        documentsFound: result.products.filter(p => p.datasheetUrl).length,
+        executionTimeMs: Date.now() - startedAt.getTime(),
+        endedAt: new Date(),
+        errorLog: failedSources.length ? failedSources.map(st => `${st.url}: ${st.status}${st.error ? ` (${st.error})` : ''}`).join('\n') : null,
+      }).where(eq(scrapingJobs.id, job.id)).returning();
+
+      const warning = failedSources.length ? ` ${failedSources.length} fuente(s) no se pudieron procesar.` : '';
+      return {
+        job: finishedJob,
+        productCount: result.products.length,
+        message: `Extracción finalizada: ${result.products.length} producto(s) en borrador para revisión.${warning}`,
+      };
+  };
+
+  app.post("/api/admin/scraper/jobs", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const { sourceId, urlId } = req.body;
+      // Real extraction over the registered URLs (one URL, or every ACTIVE one).
+      const targets = urlId
+        ? await db.select().from(scraperUrls).where(eq(scraperUrls.id, Number(urlId)))
+        : await db.select().from(scraperUrls).where(eq(scraperUrls.status, 'ACTIVE'));
+      if (targets.length === 0) {
+        return res.status(400).json({ error: "No hay URLs activas registradas. Agregue y valide al menos una URL de fabricante antes de extraer." });
+      }
+      const outcome = await runScrapingJob(targets, sourceId ? Number(sourceId) : null, urlId ? Number(urlId) : null);
+      res.status(201).json({ success: true, job: outcome.job, message: outcome.message });
+    } catch (e: any) {
       console.error("Error running scraping job:", e);
-      res.status(500).json({ error: "Failed to execute scraping job" });
+      res.status(500).json({ error: e.message || "No se pudo ejecutar la extracción." });
     }
   });
 
@@ -3476,7 +3704,7 @@ ${urls}
       // Check if brand exists or create
       let brandId = null;
       if (draft.brand) {
-        const slug = draft.brand.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+        const slug = slugify(draft.brand);
         const [existingBrand] = await db.select().from(brands).where(eq(brands.slug, slug));
         if (existingBrand) {
           brandId = existingBrand.id;
@@ -3492,17 +3720,19 @@ ${urls}
       }
 
       // Insert into official products table
-      const slug = `${(draft.name || 'product').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Math.floor(Math.random() * 9000) + 1000}`;
+      const slug = `${slugify(draft.name || 'producto')}-${draft.id}`;
       const [newProduct] = await db.insert(products).values({
         name: draft.name,
         brandId,
         manufacturer: draft.manufacturer || draft.brand || '',
-        model: draft.model || 'Standard',
-        catalogNumber: draft.reference || `REF-${Math.floor(Math.random() * 90000) + 10000}`,
+        // Never invent a model or reference code: leave them empty for review.
+        model: draft.model || null,
+        catalogNumber: draft.reference || null,
         description: draft.description || '',
         application: draft.applications || '',
         presentation: draft.presentation || '',
         verificationStatus: 'VERIFIED',
+        publicationStatus: 'PUBLISHED',
         status: 'ACTIVE',
         slug,
         sourceUrl: draft.productUrl || ''
@@ -3893,8 +4123,10 @@ ${urls}
 
       res.json({
         databaseStatus: "CONNECTED",
-        poolConnections: 12,
-        maxPool: 100,
+        databaseEngine: global._dbEngineType || 'pglite',
+        // Real pool usage when running on PostgreSQL; embedded PGlite has no pool.
+        poolConnections: global._dbEngineType === 'postgres' && global._postgresPool ? global._postgresPool.totalCount : null,
+        maxPool: global._dbEngineType === 'postgres' && global._postgresPool ? global._postgresPool.options.max ?? null : null,
         metrics: {
           totalProducts: totalProds[0]?.count || 0,
           draft: draftProds[0]?.count || 0,
@@ -4499,6 +4731,25 @@ ${urls}
     } catch (e: any) {
       res.status(500).json({ error: e.message || "Failed to activate safe start" });
     }
+  });
+
+  // Unknown API routes answer JSON 404 instead of the SPA's index.html.
+  app.use('/api', (req, res) => {
+    res.status(404).json({ error: "Ruta de API no encontrada" });
+  });
+
+  // Errors (including invalid/oversized JSON bodies) answer JSON on the API.
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (res.headersSent) return next(err);
+    const status = err?.status || err?.statusCode || 500;
+    if (status >= 500) console.error('Unhandled error:', err);
+    if (req.path.startsWith('/api')) {
+      const message = status === 413 ? 'El contenido enviado es demasiado grande.'
+        : status === 400 ? 'Solicitud inválida.'
+        : 'Error interno del servidor.';
+      return res.status(status).json({ error: message });
+    }
+    res.status(status).send('Error');
   });
 
   const isProduction = process.env.NODE_ENV === "production" || process.argv[1]?.endsWith("dist/server.cjs") || process.argv[1]?.includes("\\dist\\server.cjs");
